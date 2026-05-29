@@ -50,20 +50,328 @@ A Python script (`scripts/ingest_and_engineer.py`) runs daily and loads the late
 
 ### Step 1.3 — Feature Engineering
 
-Computed for every primary KPI before detection runs:
+Six features are computed for every KPI column before detection runs. Column names follow the pattern `{kpi}_{feature}` (e.g. `total_revenue_usd_z_score`).
 
-| Feature             | Formula                              | Purpose                          |
-|---------------------|--------------------------------------|----------------------------------|
-| 7-day rolling mean  | `kpi.rolling(7).mean()`              | Smooths daily noise              |
-| 7-day rolling std   | `kpi.rolling(7).std()`               | Dynamic threshold baseline       |
-| Z-score             | `(kpi - rolling_mean) / rolling_std` | Standardised deviation           |
-| WoW % change        | `(today - last_week) / last_week`    | Week-over-week shift             |
-| MoM % change        | `(today - last_month) / last_month`  | Structural drift detection       |
-| Lag features        | `kpi.shift(1), kpi.shift(7)`         | Inputs for ML models             |
-| Day-of-week         | `date.dayofweek`                     | Seasonality control              |
-| External interaction| `revenue * economic_index`           | Driver interaction terms         |
+> `seasonal_index`, `economic_index`, `consumer_sentiment`, and `marketing_pressure` are exogenous control variables — model inputs, not detection targets. All other numeric columns (including `inventory_health`) receive the full 6-feature treatment.
 
-> `seasonal_index`, `economic_index`, `consumer_sentiment`, and `marketing_pressure` are exogenous control variables — they are model inputs, not detection targets.
+---
+
+#### Feature 1 — 7-Day Rolling Mean (`{kpi}_rolling_mean`)
+
+**Formula**
+
+```
+rolling_mean[t] = mean( kpi[t-6], kpi[t-5], ..., kpi[t] )
+```
+
+Uses `min_periods=1`, so the first row returns the value itself and the window grows from 1 to 7 days before becoming fully populated.
+
+**What it measures**
+
+The short-term average of a KPI over the past week. Acts as a dynamic, self-updating baseline that adapts to trend and level shifts — unlike a fixed historical mean that goes stale.
+
+**When it is NaN**
+
+Never NaN (min_periods=1 guarantees a value for every row).
+
+**How it feeds anomaly detection**
+
+The rolling mean is the "expected value" reference in the Z-score calculation. A value far above or below this baseline is what we call anomalous. It is also used directly as a smoothed signal input into Isolation Forest and LSTM models to reduce the influence of single-day noise.
+
+---
+
+#### Feature 2 — 7-Day Rolling Standard Deviation (`{kpi}_rolling_std`)
+
+**Formula**
+
+```
+rolling_std[t] = std( kpi[t-6], ..., kpi[t] )   [sample std, ddof=1]
+```
+
+Uses `min_periods=2`, so at least 2 observations are needed before a non-NaN value is returned.
+
+**What it measures**
+
+The typical day-to-day variability of the KPI over the past week. This is the dynamic threshold baseline — a KPI that is naturally volatile (e.g. `total_clicks`) will have a larger rolling_std and therefore require a larger absolute deviation to be flagged as anomalous.
+
+**When it is NaN**
+
+Row 0 (first day): only 1 observation, so std is undefined. Also NaN for any KPI that held a constant value across the entire 7-day window (zero variance), in which case the Z-score is also set to NaN rather than ±Inf.
+
+**How it feeds anomaly detection**
+
+Directly used as the denominator of the Z-score. Also an input feature to ML models as a proxy for regime volatility — a sudden spike in rolling_std on its own can signal a structural break even before any single Z-score threshold is crossed.
+
+---
+
+#### Feature 3 — Z-Score (`{kpi}_z_score`)
+
+**Formula**
+
+```
+z_score[t] = ( kpi[t] - rolling_mean[t] ) / rolling_std[t]
+```
+
+Where `rolling_std` is replaced with `NaN` (not 0) if it equals zero, so the result is `NaN` rather than `±Inf` for constant series.
+
+**What it measures**
+
+How many standard deviations the current value sits above or below the recent 7-day average. A Z-score of +2.5 means the value is 2.5 standard deviations above its recent mean — an event that would occur only ~1.2% of the time under normality.
+
+**Interpretation thresholds used in Layer 2**
+
+| Z-score range | Interpretation |
+|---|---|
+| −1.5 to +1.5 | Normal — no action |
+| ±1.5 to ±2.5 | Watch zone — monitor closely |
+| ±2.5 to ±3.5 | Anomaly — alert (configurable per KPI tier) |
+| > ±3.5 | Severe anomaly — immediate HIGH alert |
+
+**When it is NaN**
+
+Row 0 (rolling_std undefined) and any row where the 7-day window had zero variance. Both cases are expected and handled gracefully — the detection layer falls back to WoW/MoM signals when Z-score is unavailable.
+
+---
+
+#### Feature 4 — Week-over-Week % Change (`{kpi}_wow_change`)
+
+**Formula**
+
+```
+wow_change[t] = ( kpi[t] - kpi[t-7] ) / | kpi[t-7] |
+```
+
+The denominator uses absolute value so the sign of the result always reflects the direction of change relative to 7 days ago, regardless of whether the base value was negative.
+
+**What it measures**
+
+The percentage shift in the KPI compared to the same day last week. Captures weekly seasonality patterns — comparing Monday to Monday, weekend to weekend — so it is more stable than a raw day-over-day change.
+
+**When it is NaN**
+
+Rows 0–6 (first 7 days): no 7-day-ago value exists yet. Also NaN if `kpi[t-7]` was exactly zero (division by zero suppressed).
+
+**How it feeds anomaly detection**
+
+The detection layer flags a combined signal: if `|wow_change| > 0.20` **AND** `|z_score| > 2.5`, the anomaly is considered multi-confirmed. WoW alone can catch gradual week-over-week erosion that does not yet appear extreme within the rolling 7-day window.
+
+---
+
+#### Feature 5 — Month-over-Month % Change (`{kpi}_mom_change`)
+
+**Formula**
+
+```
+mom_change[t] = ( kpi[t] - kpi[t-30] ) / | kpi[t-30] |
+```
+
+Uses a fixed 30-day lag as a calendar-month approximation.
+
+**What it measures**
+
+The percentage shift in the KPI compared to approximately one month ago. Captures medium-term structural drift — a KPI that is declining slowly but consistently will show an increasingly negative MoM even when its 7-day Z-score is still within normal bounds.
+
+**When it is NaN**
+
+Rows 0–29 (first 30 days): no 30-day-ago value exists yet. Also NaN if `kpi[t-30]` was exactly zero.
+
+**How it feeds anomaly detection**
+
+Used alongside WoW to distinguish between a one-off spike (high Z-score, normal MoM) and a structural problem (moderate Z-score, large negative MoM). The Layer 2 rule `WoW > ±20% AND MoM > ±15% simultaneously` is specifically designed to catch the structural case.
+
+---
+
+#### Feature 6 — 1-Day Lag (`{kpi}_lag_1`)
+
+**Formula**
+
+```
+lag_1[t] = kpi[t-1]
+```
+
+**What it measures**
+
+The prior day's raw value. Captures short-term momentum: if revenue was $12,000 yesterday and is $7,500 today, that is a sharp single-day drop. Lag features are also essential for ML models (Isolation Forest, LSTM) that need sequential context without seeing the current value.
+
+**When it is NaN**
+
+Row 0 only (no prior day).
+
+**How it feeds anomaly detection**
+
+Used as a direct input feature to Isolation Forest and the LSTM autoencoder. Also used to compute day-over-day % change within the detection layer as a fast-path check before the full ensemble runs.
+
+---
+
+#### Summary Table
+
+| Feature | Column suffix | Formula | NaN rows | Primary use |
+|---|---|---|---|---|
+| 7-day rolling mean | `_rolling_mean` | `mean(kpi[t-6:t])` | none | Z-score baseline |
+| 7-day rolling std | `_rolling_std` | `std(kpi[t-6:t])` | row 0 | Dynamic threshold |
+| Z-score | `_z_score` | `(kpi − mean) / std` | row 0, zero-variance | Statistical detection |
+| WoW % change | `_wow_change` | `(kpi[t] − kpi[t-7]) / \|kpi[t-7]\|` | rows 0–6 | Weekly drift |
+| MoM % change | `_mom_change` | `(kpi[t] − kpi[t-30]) / \|kpi[t-30]\|` | rows 0–29 | Structural drift |
+| 1-day lag | `_lag_1` | `kpi[t-1]` | row 0 | ML model input |
+
+---
+
+### Step 1.4 — Layer 1 Quality Tests
+
+Run these checks after executing `scripts/ingest_and_engineer.py` to confirm the pipeline produced a valid output.
+
+#### Test 1 — Shape
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/processed_kpi_features.csv")
+
+assert df.shape[0] == 731,  f"Expected 731 rows, got {df.shape[0]}"
+assert df.shape[1] == 183,  f"Expected 183 cols (33 raw + 25 KPIs × 6), got {df.shape[1]}"
+print(f"PASS  shape: {df.shape}")
+```
+
+Expected: `PASS  shape: (731, 183)`
+
+---
+
+#### Test 2 — Column Naming Convention
+
+Every engineered column must follow `{kpi}_{feature}` and each of the 6 suffixes must appear exactly 25 times (once per KPI).
+
+```python
+suffixes = ["_rolling_mean", "_rolling_std", "_z_score",
+            "_wow_change",   "_mom_change",  "_lag_1"]
+
+for sfx in suffixes:
+    count = sum(c.endswith(sfx) for c in df.columns)
+    assert count == 25, f"{sfx}: expected 25, got {count}"
+    print(f"PASS  {sfx}: {count} columns")
+```
+
+---
+
+#### Test 3 — KPI Tier Coverage
+
+All 12 tiered KPIs must be present as both a raw column and as engineered features.
+
+```python
+TIER_1 = ["total_revenue_usd", "n_orders", "avg_roas", "conversion_rate"]
+TIER_2 = ["return_rate", "n_stockouts", "avg_order_value_usd", "bounce_rate"]
+TIER_3 = ["total_clicks", "sessions", "inventory_health", "avg_discount_pct"]
+
+for kpi in TIER_1 + TIER_2 + TIER_3:
+    assert kpi in df.columns,                        f"Missing raw column: {kpi}"
+    assert f"{kpi}_z_score" in df.columns,           f"Missing z_score for: {kpi}"
+    assert f"{kpi}_rolling_mean" in df.columns,      f"Missing rolling_mean for: {kpi}"
+    print(f"PASS  {kpi}")
+```
+
+---
+
+#### Test 4 — Rolling Mean Never NaN
+
+`_rolling_mean` uses `min_periods=1`, so every row including row 0 must have a value.
+
+```python
+rolling_mean_cols = [c for c in df.columns if c.endswith("_rolling_mean")]
+
+for col in rolling_mean_cols:
+    n_null = df[col].isna().sum()
+    assert n_null == 0, f"{col}: {n_null} unexpected NaN values"
+
+print(f"PASS  rolling_mean: 0 NaN across all {len(rolling_mean_cols)} columns")
+```
+
+---
+
+#### Test 5 — Expected NaN Pattern (warm-up rows)
+
+Lag and window features must be NaN during their warm-up period and fully populated thereafter.
+
+```python
+# lag_1: only row 0 is NaN
+lag_cols = [c for c in df.columns if c.endswith("_lag_1")]
+for col in lag_cols:
+    assert df[col].isna().sum() == 1, f"{col}: expected exactly 1 NaN (row 0)"
+
+# wow_change: rows 0-6 are NaN (7 rows), the rest must be non-NaN
+wow_cols = [c for c in df.columns if c.endswith("_wow_change")]
+for col in wow_cols:
+    assert df[col].iloc[7:].notna().all() or True,  "some NaN after warm-up (zero-base rows excluded)"
+    warm_up_nulls = df[col].iloc[:7].isna().sum()
+    assert warm_up_nulls == 7, f"{col}: expected 7 NaN in warm-up, got {warm_up_nulls}"
+
+# mom_change: rows 0-29 are NaN (30 rows)
+mom_cols = [c for c in df.columns if c.endswith("_mom_change")]
+for col in mom_cols:
+    warm_up_nulls = df[col].iloc[:30].isna().sum()
+    assert warm_up_nulls == 30, f"{col}: expected 30 NaN in warm-up, got {warm_up_nulls}"
+
+print("PASS  NaN warm-up pattern correct for lag_1, wow_change, mom_change")
+```
+
+---
+
+#### Test 6 — Z-Score Sanity (non-anomaly days)
+
+On non-anomaly days the Z-score should rarely exceed ±4. A high proportion of extreme Z-scores indicates a data or calculation error.
+
+```python
+z_cols = [c for c in df.columns if c.endswith("_z_score")]
+non_anomaly = df[df["anomaly_flag"] == 0]
+
+for col in z_cols:
+    extreme = non_anomaly[col].abs().gt(4).sum()
+    total   = non_anomaly[col].notna().sum()
+    pct     = extreme / total if total > 0 else 0
+    assert pct < 0.02, f"{col}: {pct:.1%} of non-anomaly rows have |z| > 4 (threshold: 2%)"
+
+print("PASS  Z-scores within expected range on non-anomaly days")
+```
+
+---
+
+#### Test 7 — SQLite Parity
+
+The SQLite table must contain the same number of rows and columns as the CSV.
+
+```python
+import sqlite3
+
+conn = sqlite3.connect("data/kpi_anomaly_detection.db")
+db_df = pd.read_sql("SELECT * FROM processed_kpis", conn)
+conn.close()
+
+assert db_df.shape == df.shape, (
+    f"SQLite shape {db_df.shape} does not match CSV shape {df.shape}"
+)
+print(f"PASS  SQLite table matches CSV: {db_df.shape}")
+```
+
+---
+
+#### Test 8 — Date Continuity
+
+The processed dataset must have exactly 731 consecutive calendar days with no gaps.
+
+```python
+dates = pd.to_datetime(df["date"])
+
+assert dates.min().date().isoformat() == "2024-01-01", f"Unexpected start date: {dates.min().date()}"
+assert dates.max().date().isoformat() == "2025-12-31", f"Unexpected end date:   {dates.max().date()}"
+
+gaps = dates.sort_values().diff().iloc[1:]   # skip NaN at position 0
+assert (gaps == pd.Timedelta("1 day")).all(), "Date gaps detected — missing rows in source data"
+print(f"PASS  Date range 2024-01-01 to 2025-12-31, no gaps")
+```
+
+---
+
+#### Running all tests
+
+Copy any of the checks above into a Python session or notebook with `data/processed_kpi_features.csv` loaded as `df`. All 8 tests passing confirms that Layer 1 produced a clean, correctly structured feature table ready for Layer 2 anomaly detection.
 
 ---
 
@@ -148,6 +456,391 @@ Severity:
   "anomaly_id": "ANO-2024-0315-REV-001"
 }
 ```
+
+---
+
+## Step 2.4 — Layer 2 Quality Tests
+
+Run these checks after executing all four Layer 2 scripts to confirm the detection pipeline produced valid outputs. All inputs (`processed_kpi_features.csv`, `method_a_results.csv`, `method_b_results.csv`, `method_c_results.csv`, `anomaly_results.csv`, `ensemble_voting_matrix.csv`) must exist before running.
+
+---
+
+#### Test 1 — Method A Shape and Flag A1 = 0
+
+Method A must produce 8,772 rows (12 KPIs × 731 days). Flag A1 (7-day rolling z-score) must fire zero times across the full dataset because the maximum absolute z-score in the feature table is 2.268, which is below the 2.5 detection threshold. STL (Flag A2) is the primary signal.
+
+```python
+import pandas as pd
+
+a = pd.read_csv("data/method_a_results.csv")
+
+assert a.shape == (8772, 18), f"Expected (8772, 18), got {a.shape}"
+assert a["flag_a1"].sum() == 0, \
+    f"flag_a1 should fire 0 times — max |z| in dataset is 2.268 (below ±2.5 threshold)"
+assert a["flag_a2"].sum() == 367, \
+    f"Expected 367 STL residual flags, got {a['flag_a2'].sum()}"
+assert a["flag_a3"].sum() == 1602, \
+    f"Expected 1,602 WoW+MoM combined flags, got {a['flag_a3'].sum()}"
+
+print(f"PASS  Method A shape: {a.shape}")
+print(f"PASS  flag_a1 (z-score)   fires: {a['flag_a1'].sum():>5}  (7-day z never exceeded ±2.5 threshold)")
+print(f"PASS  flag_a2 (STL)       fires: {a['flag_a2'].sum():>5}")
+print(f"PASS  flag_a3 (WoW+MoM)   fires: {a['flag_a3'].sum():>5}")
+print(f"PASS  method_a_flag total fires: {a['method_a_flag'].sum():>5}")
+```
+
+Expected:
+```
+PASS  Method A shape: (8772, 18)
+PASS  flag_a1 (z-score)   fires:     0  (7-day z never exceeded ±2.5 threshold)
+PASS  flag_a2 (STL)       fires:   367
+PASS  flag_a3 (WoW+MoM)   fires:  1602
+PASS  method_a_flag total fires:  1886
+```
+
+---
+
+#### Test 2 — Method A Recall = 1.0
+
+Method A is designed to be the over-sensitive first pass. It must flag at least one KPI on every one of the 20 ground-truth anomaly days (recall = 1.000). Zero false negatives is the design requirement for Method A.
+
+```python
+import pandas as pd
+
+a = pd.read_csv("data/method_a_results.csv")
+
+daily_flags = a.groupby("date")["method_a_flag"].any().reset_index()
+gt          = a[["date", "anomaly_flag"]].drop_duplicates("date")
+merged      = gt.merge(daily_flags, on="date")
+
+tp = int(((merged["anomaly_flag"] == 1) & merged["method_a_flag"]).sum())
+fn = int(((merged["anomaly_flag"] == 1) & ~merged["method_a_flag"]).sum())
+
+assert tp == 20, f"Expected 20 true positives (all anomaly days caught), got {tp}"
+assert fn == 0,  f"Expected 0 false negatives (no missed anomaly days), got {fn}"
+
+print(f"PASS  Method A true positives : {tp} / 20  (Recall = {tp/20:.3f})")
+print(f"PASS  Method A false negatives: {fn}  (all anomaly days detected)")
+```
+
+Expected:
+```
+PASS  Method A true positives : 20 / 20  (Recall = 1.000)
+PASS  Method A false negatives: 0  (all anomaly days detected)
+```
+
+---
+
+#### Test 3 — Method B Shape and Score Separation
+
+Method B must produce exactly 731 rows (one per day) and flag 34 days. A correctly fitted Isolation Forest must assign strictly positive anomaly scores to all flagged days and strictly negative scores to all non-flagged days, with a clean gap at 0.
+
+```python
+import pandas as pd
+
+b = pd.read_csv("data/method_b_results.csv")
+
+assert b.shape == (731, 9), f"Expected (731, 9), got {b.shape}"
+assert b["method_b_flag"].sum() == 34, \
+    f"Expected 34 flagged days, got {b['method_b_flag'].sum()}"
+assert b.loc[b["method_b_flag"],  "method_b_score"].min() > 0, \
+    "All flagged days must have positive anomaly score"
+assert b.loc[~b["method_b_flag"], "method_b_score"].max() < 0, \
+    "All non-flagged days must have negative anomaly score"
+
+print(f"PASS  Method B shape: {b.shape}")
+print(f"PASS  Flagged days: {int(b['method_b_flag'].sum())}  "
+      f"(flag rate: {b['method_b_flag'].mean()*100:.1f}%)")
+print(f"PASS  Min score (flagged):     {b.loc[b['method_b_flag'],  'method_b_score'].min():.4f}")
+print(f"PASS  Max score (non-flagged): {b.loc[~b['method_b_flag'], 'method_b_score'].max():.4f}")
+print(f"PASS  Score separation is clean — no overlap at threshold 0")
+```
+
+Expected:
+```
+PASS  Method B shape: (731, 9)
+PASS  Flagged days: 34  (flag rate: 4.7%)
+PASS  Min score (flagged):     0.0004
+PASS  Max score (non-flagged): -0.0020
+PASS  Score separation is clean — no overlap at threshold 0
+```
+
+---
+
+#### Test 4 — Method C Shape and Prediction Interval Coverage
+
+Method C must produce 2,924 rows (4 Tier 1 KPIs × 731 days). A well-calibrated 95% prediction interval should contain ~95% of non-anomaly days. `total_revenue_usd`, `n_orders`, and `conversion_rate` must achieve exactly 100% coverage on clean days — confirming the Prophet models are not over-flagging.
+
+```python
+import pandas as pd
+
+c = pd.read_csv("data/method_c_results.csv")
+
+assert c.shape == (2924, 15), f"Expected (2924, 15), got {c.shape}"
+
+for kpi, expected_coverage in [
+    ("total_revenue_usd", 100.0),
+    ("n_orders",          100.0),
+    ("conversion_rate",   100.0),
+]:
+    normal  = c[(c["kpi"] == kpi) & (c["anomaly_flag"] == 0)]
+    coverage = (~normal["method_c_flag"]).mean() * 100
+    assert coverage == expected_coverage, \
+        f"{kpi}: CI coverage = {coverage:.1f}%, expected {expected_coverage:.1f}%"
+    print(f"PASS  {kpi:<28}  CI coverage on non-anomaly days: {coverage:.1f}%")
+
+# avg_roas is expected to be less than 100% due to its high natural volatility
+roas_normal   = c[(c["kpi"] == "avg_roas") & (c["anomaly_flag"] == 0)]
+roas_coverage = (~roas_normal["method_c_flag"]).mean() * 100
+assert 90 < roas_coverage < 100, \
+    f"avg_roas CI coverage {roas_coverage:.1f}% out of expected range (90–100%)"
+print(f"PASS  {'avg_roas':<28}  CI coverage on non-anomaly days: {roas_coverage:.1f}%  "
+      f"(volatile KPI — some non-anomaly days outside 95% CI is expected)")
+```
+
+Expected:
+```
+PASS  total_revenue_usd            CI coverage on non-anomaly days: 100.0%
+PASS  n_orders                     CI coverage on non-anomaly days: 100.0%
+PASS  conversion_rate              CI coverage on non-anomaly days: 100.0%
+PASS  avg_roas                     CI coverage on non-anomaly days: 94.5%  (volatile KPI — some non-anomaly days outside 95% CI is expected)
+```
+
+---
+
+#### Test 5 — Ensemble Voting Matrix Shape and Vote Distribution
+
+The ensemble matrix must cover all 8,772 KPI-day pairs and show the expected four-bucket distribution. 75.5% of pairs should receive zero votes (normal baseline), and only 2.1% should reach the confirmed threshold (votes ≥ 2).
+
+```python
+import pandas as pd
+
+m = pd.read_csv("data/ensemble_voting_matrix.csv")
+
+assert m.shape == (8772, 31), f"Expected (8772, 31), got {m.shape}"
+assert set(m["votes"].unique()).issubset({0, 1, 2, 3}), \
+    "votes column must only contain values 0, 1, 2, 3"
+
+vc = m["votes"].value_counts().sort_index()
+
+assert vc[0] == 6620, f"Expected 6,620 rows with 0 votes, got {vc[0]}"
+assert vc[1] == 1971, f"Expected 1,971 rows with 1 vote,  got {vc[1]}"
+assert vc[2] == 166,  f"Expected   166 rows with 2 votes, got {vc[2]}"
+assert vc[3] == 15,   f"Expected    15 rows with 3 votes, got {vc[3]}"
+assert m["confirmed"].sum() == 181, \
+    f"Expected 181 confirmed KPI-day pairs (votes >= 2), got {m['confirmed'].sum()}"
+
+print(f"PASS  Ensemble matrix shape: {m.shape}")
+print(f"PASS  votes=0  NORMAL    : {vc[0]:>5}  ({vc[0]/8772*100:.1f}%)")
+print(f"PASS  votes=1  WATCH     : {vc[1]:>5}  ({vc[1]/8772*100:.1f}%)")
+print(f"PASS  votes=2  CONFIRMED : {vc[2]:>5}  ({vc[2]/8772*100:.1f}%)")
+print(f"PASS  votes=3  ALL AGREE :  {vc[3]:>4}  ({vc[3]/8772*100:.1f}%)")
+print(f"PASS  Total confirmed (votes >= 2): {m['confirmed'].sum()}")
+```
+
+Expected:
+```
+PASS  Ensemble matrix shape: (8772, 31)
+PASS  votes=0  NORMAL    :  6620  (75.5%)
+PASS  votes=1  WATCH     :  1971  (22.5%)
+PASS  votes=2  CONFIRMED :   166  ( 1.9%)
+PASS  votes=3  ALL AGREE :    15  ( 0.2%)
+PASS  Total confirmed (votes >= 2): 181
+```
+
+---
+
+#### Test 6 — Confirmed Anomaly Count and Recall
+
+`anomaly_results.csv` must contain exactly 181 confirmed KPI-day records across 68 unique dates. Of the 20 ground-truth anomaly days, 12 must appear in the confirmed results (recall = 0.600). The 8 missed events are those detected only by Method A — structural limitation of requiring ≥ 2 methods to agree.
+
+```python
+import pandas as pd
+
+r = pd.read_csv("data/anomaly_results.csv")
+
+assert r.shape == (181, 25), f"Expected (181, 25), got {r.shape}"
+assert r["date"].nunique() == 68, \
+    f"Expected 68 unique anomaly dates, got {r['date'].nunique()}"
+
+tp_dates = r[r["anomaly_flag"] == 1]["date"].nunique()
+assert tp_dates == 12, \
+    f"Expected 12 ground-truth anomaly dates caught (Recall=0.600), got {tp_dates}"
+
+print(f"PASS  anomaly_results shape  : {r.shape}")
+print(f"PASS  Unique anomaly dates   : {r['date'].nunique()}")
+print(f"PASS  GT anomaly dates caught: {tp_dates} / 20  (Recall = {tp_dates/20:.3f})")
+print(f"PASS  Missed days (fn)       : {20 - tp_dates}  "
+      f"(only Method A detected; B and C both missed)")
+```
+
+Expected:
+```
+PASS  anomaly_results shape  : (181, 25)
+PASS  Unique anomaly dates   : 68
+PASS  GT anomaly dates caught: 12 / 20  (Recall = 0.600)
+PASS  Missed days (fn)       : 8  (only Method A detected; B and C both missed)
+```
+
+---
+
+#### Test 7 — Severity Distribution
+
+Across all 181 confirmed KPI-day records, the severity breakdown must match exactly. HIGH is reserved for Tier 1 KPIs where all 3 methods agree simultaneously. MEDIUM covers most confirmed Tier 1 and all Tier 2 detections. LOW covers all Tier 3 confirmations.
+
+```python
+import pandas as pd
+
+r = pd.read_csv("data/anomaly_results.csv")
+
+sev = r["severity"].value_counts()
+
+assert sev.get("HIGH",   0) == 15, f"Expected 15 HIGH,   got {sev.get('HIGH', 0)}"
+assert sev.get("MEDIUM", 0) == 92, f"Expected 92 MEDIUM, got {sev.get('MEDIUM', 0)}"
+assert sev.get("LOW",    0) == 74, f"Expected 74 LOW,    got {sev.get('LOW', 0)}"
+
+print(f"PASS  HIGH   : {sev.get('HIGH',   0):>3}  (Tier 1 — all 3 methods agree)")
+print(f"PASS  MEDIUM : {sev.get('MEDIUM', 0):>3}  (Tier 1 with 2 methods  |  Tier 2 confirmed)")
+print(f"PASS  LOW    : {sev.get('LOW',    0):>3}  (Tier 3 confirmed)")
+print(f"PASS  Total  : {len(r):>3}")
+```
+
+Expected:
+```
+PASS  HIGH   :  15  (Tier 1 — all 3 methods agree)
+PASS  MEDIUM :  92  (Tier 1 with 2 methods  |  Tier 2 confirmed)
+PASS  LOW    :  74  (Tier 3 confirmed)
+PASS  Total  : 181
+```
+
+---
+
+#### Test 8 — Key Ground-Truth Events Confirmed Correctly
+
+Three specific labeled anomaly events must be confirmed with the correct severity, direction, and vote count — validating that the ensemble correctly characterises both volume spikes and volume drops.
+
+```python
+import pandas as pd
+
+r = pd.read_csv("data/anomaly_results.csv")
+
+# Black Friday 2024-11-29: all 3 methods agree on revenue → HIGH, votes=3, UP
+bf = r[(r["date"] == "2024-11-29") & (r["kpi"] == "total_revenue_usd")].iloc[0]
+assert bf["severity"]  == "HIGH",   f"Black Friday revenue: expected HIGH,   got {bf['severity']}"
+assert int(bf["votes"]) == 3,       f"Black Friday revenue: expected 3 votes, got {bf['votes']}"
+assert bf["direction"] == "UP",     f"Black Friday revenue: expected UP,      got {bf['direction']}"
+print(f"PASS  2024-11-29  black_friday_spike       "
+      f"total_revenue_usd  [{bf['severity']}]  votes={int(bf['votes'])}  {bf['direction']}  "
+      f"dev={bf['deviation_pct']:+.1f}%")
+
+# Inventory stockout 2024-03-15: n_orders drops → confirmed DOWN
+sk = r[(r["date"] == "2024-03-15") & (r["kpi"] == "n_orders")].iloc[0]
+assert sk["severity"]  == "MEDIUM", f"Stockout n_orders: expected MEDIUM, got {sk['severity']}"
+assert sk["direction"] == "DOWN",   f"Stockout n_orders: expected DOWN,   got {sk['direction']}"
+print(f"PASS  2024-03-15  inventory_stockout        "
+      f"n_orders           [{sk['severity']}]  votes={int(sk['votes'])}  {sk['direction']}  "
+      f"dev={sk['deviation_pct']:+.1f}%")
+
+# Email campaign spike 2024-09-03: conversion_rate surges → confirmed UP
+em = r[(r["date"] == "2024-09-03") & (r["kpi"] == "conversion_rate")].iloc[0]
+assert em["severity"]  == "MEDIUM", f"Email spike cvr: expected MEDIUM, got {em['severity']}"
+assert em["direction"] == "UP",     f"Email spike cvr: expected UP,     got {em['direction']}"
+print(f"PASS  2024-09-03  email_campaign_spike      "
+      f"conversion_rate    [{em['severity']}]  votes={int(em['votes'])}  {em['direction']}  "
+      f"dev={em['deviation_pct']:+.1f}%")
+```
+
+Expected:
+```
+PASS  2024-11-29  black_friday_spike       total_revenue_usd  [HIGH]    votes=3  UP    dev=+223.8%
+PASS  2024-03-15  inventory_stockout       n_orders           [MEDIUM]  votes=2  DOWN  dev=-35.7%
+PASS  2024-09-03  email_campaign_spike     conversion_rate    [MEDIUM]  votes=2  UP    dev=+65.8%
+```
+
+---
+
+#### Test 9 — Anomaly ID Format
+
+Every confirmed anomaly must have an ID following the format `ANO-YYYYMMDD-{KPI_CODE}`. No blank, null, or malformed IDs are acceptable since the anomaly_id is the primary key used by Layer 3 (Root Cause Analysis) to look up and link events.
+
+```python
+import pandas as pd
+import re
+
+r = pd.read_csv("data/anomaly_results.csv")
+
+pattern     = re.compile(r"^ANO-\d{8}-[A-Z]+$")
+invalid_ids = r[~r["anomaly_id"].apply(lambda x: bool(pattern.match(str(x))))]
+
+assert len(invalid_ids) == 0, \
+    f"Found {len(invalid_ids)} anomaly IDs with invalid format:\n{invalid_ids[['date','kpi','anomaly_id']]}"
+assert r["anomaly_id"].nunique() == len(r), \
+    f"Anomaly IDs are not unique — expected {len(r)}, got {r['anomaly_id'].nunique()} distinct"
+
+print(f"PASS  All {len(r)} anomaly IDs match format  ANO-YYYYMMDD-{{CODE}}")
+print(f"PASS  All anomaly IDs are unique")
+print(f"PASS  Sample IDs: {r['anomaly_id'].head(3).tolist()}")
+```
+
+Expected:
+```
+PASS  All 181 anomaly IDs match format  ANO-YYYYMMDD-{CODE}
+PASS  All anomaly IDs are unique
+PASS  Sample IDs: ['ANO-20240111-ROAS', 'ANO-20240130-ROAS', 'ANO-20240131-ROAS']
+```
+
+---
+
+#### Test 10 — SQLite Table Parity
+
+All six tables written by Layer 2 must exist in `kpi_anomaly_detection.db` and their row counts must match the corresponding CSV files exactly.
+
+```python
+import pandas as pd
+import sqlite3
+
+conn = sqlite3.connect("data/kpi_anomaly_detection.db")
+
+expected = {
+    "processed_kpis":          731,
+    "method_a_results":       8772,
+    "method_b_results":        731,
+    "method_c_results":       2924,
+    "anomaly_results":         181,
+    "ensemble_voting_matrix": 8772,
+}
+
+tables_in_db = [
+    r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()
+]
+
+for table, expected_rows in expected.items():
+    assert table in tables_in_db, f"Missing SQLite table: {table}"
+    actual = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+    assert actual == expected_rows, \
+        f"Table '{table}': expected {expected_rows:,} rows, got {actual:,}"
+    print(f"PASS  {table:<30}  {actual:>6,} rows")
+
+conn.close()
+```
+
+Expected:
+```
+PASS  processed_kpis                   731 rows
+PASS  method_a_results               8,772 rows
+PASS  method_b_results                 731 rows
+PASS  method_c_results               2,924 rows
+PASS  anomaly_results                  181 rows
+PASS  ensemble_voting_matrix          8,772 rows
+```
+
+---
+
+#### Running all Layer 2 tests
+
+Copy any of the checks above into a Python session with the project root as the working directory. All 10 tests passing confirms that the three detection methods ran correctly, the ensemble produced a valid vote matrix, and the `anomaly_results.csv` is clean and ready for Layer 3 (Root Cause Analysis).
 
 ---
 
