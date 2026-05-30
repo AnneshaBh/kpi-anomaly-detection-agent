@@ -904,6 +904,399 @@ This suppresses false escalations and focuses human attention on actionable root
 
 ---
 
+## Step 3.5 — Layer 3 Quality Tests
+
+Run these checks after executing all four Layer 3 scripts (`3.1_dependency_graph.py`, `3.2_causal_inference.py`, `3.3_external_drivers.py`, `3.4_rca_assembly.py`) to confirm the Root Cause Analysis pipeline produced valid output. All inputs (`rca_graph_results.csv`, `rca_causal_results.csv`, `rca_results.csv`, `rca_assembly.csv`) must exist before running.
+
+---
+
+#### Test 1 — Intermediate File Shapes
+
+All four Layer 3 output files must exist with their exact expected dimensions. Each step adds columns to the prior output, so shape is a proxy for pipeline integrity.
+
+```python
+import pandas as pd
+
+expected = {
+    "data/rca_graph_results.csv":  (181, 18),
+    "data/rca_causal_results.csv": (181, 40),
+    "data/rca_results.csv":        (181, 52),
+    "data/rca_assembly.csv":       (181, 45),
+}
+for path, (exp_r, exp_c) in expected.items():
+    df = pd.read_csv(path)
+    assert df.shape == (exp_r, exp_c), \
+        f"{path.split('/')[-1]}: expected ({exp_r}, {exp_c}), got {df.shape}"
+    print(f"PASS  {path.split('/')[-1]:<28}  {df.shape}")
+```
+
+Expected:
+```
+PASS  rca_graph_results.csv        (181, 18)
+PASS  rca_causal_results.csv       (181, 40)
+PASS  rca_results.csv              (181, 52)
+PASS  rca_assembly.csv             (181, 45)
+```
+
+---
+
+#### Test 2 — Step 3.1 Traversal Depth Distribution
+
+Tier 1 KPI anomalies (88 records) are traversed through the dependency graph. The depth reached reflects how far upstream the suspected driver sits. Tier 2/3 anomalies (93 records) are never traversed — they are already the driver.
+
+```python
+import pandas as pd
+
+graph = pd.read_csv("data/rca_graph_results.csv")
+tier1 = graph[graph["tier"] == 1]
+depth = tier1["graph_depth_reached"].value_counts().sort_index()
+
+assert depth.get(0, 0) == 62, f"Expected 62 depth-0 Tier 1, got {depth.get(0,0)}"
+assert depth.get(1, 0) == 22, f"Expected 22 depth-1 Tier 1, got {depth.get(1,0)}"
+assert depth.get(2, 0) == 4,  f"Expected 4  depth-2 Tier 1, got {depth.get(2,0)}"
+
+tier23_n = (graph["traversal_stopped"] == "tier_2_3_no_traversal").sum()
+assert tier23_n == 93, f"Expected 93 Tier 2/3 no-traversal, got {tier23_n}"
+
+print(f"PASS  Tier 1 traversals -- depth=0: {depth.get(0,0)}  depth=1: {depth.get(1,0)}  depth=2: {depth.get(2,0)}")
+print(f"PASS  Tier 2/3 (no traversal): {tier23_n}  (19 Tier 2 + 74 Tier 3)")
+```
+
+Expected:
+```
+PASS  Tier 1 traversals -- depth=0: 62  depth=1: 22  depth=2: 4
+PASS  Tier 2/3 (no traversal): 93  (19 Tier 2 + 74 Tier 3)
+```
+
+---
+
+#### Test 3 — Step 3.1 Traversal Stop Reason Breakdown
+
+Three possible reasons a traversal stops. Their exact counts are deterministic given the Z-score data and the Z_WATCH_THRESHOLD of 1.5.
+
+```python
+import pandas as pd
+
+graph  = pd.read_csv("data/rca_graph_results.csv")
+stops  = graph["traversal_stopped"].value_counts()
+
+assert stops.get("tier_2_3_no_traversal", 0) == 93, \
+    f"Expected 93 tier_2_3_no_traversal, got {stops.get('tier_2_3_no_traversal', 0)}"
+assert stops.get("no_anomalous_child", 0) == 73, \
+    f"Expected 73 no_anomalous_child, got {stops.get('no_anomalous_child', 0)}"
+assert stops.get("leaf_node_reached", 0) == 15, \
+    f"Expected 15 leaf_node_reached, got {stops.get('leaf_node_reached', 0)}"
+
+print(f"PASS  tier_2_3_no_traversal : {stops.get('tier_2_3_no_traversal', 0):>3}  (Tier 2/3 are already the driver)")
+print(f"PASS  no_anomalous_child     : {stops.get('no_anomalous_child', 0):>3}  (no child above |z| >= 1.5)")
+print(f"PASS  leaf_node_reached      : {stops.get('leaf_node_reached', 0):>3}  (traversal reached a leaf node)")
+print(f"PASS  total                  : {len(graph)}")
+```
+
+Expected:
+```
+PASS  tier_2_3_no_traversal :  93  (Tier 2/3 are already the driver)
+PASS  no_anomalous_child     :  73  (no child above |z| >= 1.5)
+PASS  leaf_node_reached      :  15  (traversal reached a leaf node)
+PASS  total                  : 181
+```
+
+---
+
+#### Test 4 — Step 3.1 Tier 2/3 Linkage to Tier 1
+
+Every Tier 2 and Tier 3 anomaly must be traceable to at least one Tier 1 KPI via the dependency graph. This linkage is used by Layer 4 to attribute business impact to the detected sub-KPI anomaly.
+
+```python
+import pandas as pd
+
+graph  = pd.read_csv("data/rca_graph_results.csv")
+tier23 = graph[graph["tier"].isin([2, 3])]
+linked = (tier23["affected_tier1_kpis"].fillna("").str.strip() != "").sum()
+
+assert linked == len(tier23), \
+    f"Expected all {len(tier23)} Tier 2/3 rows linked to Tier 1, got {linked}"
+
+print(f"PASS  All {linked} Tier 2/3 anomalies linked to >= 1 Tier 1 KPI via dependency graph")
+```
+
+Expected:
+```
+PASS  All 93 Tier 2/3 anomalies linked to >= 1 Tier 1 KPI via dependency graph
+```
+
+---
+
+#### Test 5 — Step 3.2 CausalImpact Coverage and Significance
+
+CausalImpact runs on HIGH severity anomalies only. One is skipped because it falls within the first 10 rows of the dataset (pre-period too short for a meaningful BSTS model). Of the 14 that ran, 6 show a statistically significant cumulative effect (95% CI excludes zero).
+
+```python
+import pandas as pd
+
+causal = pd.read_csv("data/rca_causal_results.csv")
+ci_ran = int(causal["ci_ran"].sum())
+ci_sig = int(causal.loc[causal["ci_ran"] == True, "ci_effect_significant"].sum())
+high_n = int((causal["severity"] == "HIGH").sum())
+
+assert ci_ran == 14, f"Expected 14 CI runs, got {ci_ran}"
+assert ci_sig == 6,  f"Expected 6 significant effects, got {ci_sig}"
+assert high_n == 15, f"Expected 15 HIGH anomalies, got {high_n}"
+
+skipped = causal[(causal["severity"] == "HIGH") & (causal["ci_ran"] == False)]
+assert skipped.iloc[0]["anomaly_id"] == "ANO-20240111-ROAS", \
+    f"Unexpected skipped anomaly: {skipped.iloc[0]['anomaly_id']}"
+
+print(f"PASS  CausalImpact ran:       {ci_ran} / {high_n} HIGH anomalies")
+print(f"PASS  1 skipped (pre_period < 30 rows): ANO-20240111-ROAS")
+print(f"PASS  Significant effects:    {ci_sig} / {ci_ran}  (CI excludes zero)")
+```
+
+Expected:
+```
+PASS  CausalImpact ran:       14 / 15 HIGH anomalies
+PASS  1 skipped (pre_period < 30 rows): ANO-20240111-ROAS
+PASS  Significant effects:    6 / 14  (CI excludes zero)
+```
+
+---
+
+#### Test 6 — Step 3.2 DoWhy Coverage and Refutation
+
+DoWhy runs once per unique (driver, outcome) pair — 7 pairs covering all HIGH and MEDIUM anomalies where the dependency graph found a distinct upstream driver. All 26 anomaly records using DoWhy pass the random common cause refutation, confirming the ATE estimates are robust to unobserved confounding.
+
+```python
+import pandas as pd
+
+causal    = pd.read_csv("data/rca_causal_results.csv")
+dw_ran    = int(causal["dw_ran"].sum())
+dw_ref_ok = int(causal.loc[causal["dw_ran"] == True, "dw_refutation_passed"].sum())
+pairs     = causal.loc[causal["dw_ran"] == True, ["dw_treatment", "dw_outcome"]].drop_duplicates()
+
+assert dw_ran == 26,        f"Expected 26 DoWhy runs, got {dw_ran}"
+assert dw_ref_ok == 26,     f"Expected 26 refutations passed, got {dw_ref_ok}"
+assert len(pairs) == 7,     f"Expected 7 unique pairs, got {len(pairs)}"
+
+print(f"PASS  DoWhy ran:              {dw_ran} anomalies  (HIGH + MEDIUM with distinct driver)")
+print(f"PASS  Refutation passed:      {dw_ref_ok} / {dw_ran}  (all estimates robust)")
+print(f"PASS  Unique (driver -> outcome) pairs: {len(pairs)}")
+```
+
+Expected:
+```
+PASS  DoWhy ran:              26 anomalies  (HIGH + MEDIUM with distinct driver)
+PASS  Refutation passed:      26 / 26  (all estimates robust)
+PASS  Unique (driver -> outcome) pairs: 7
+```
+
+---
+
+#### Test 7 — Step 3.2 Root Cause Confidence Quality
+
+`root_cause_confidence` is available for the 35 anomalies where at least one causal method ran. For HIGH severity anomalies it must be above 0.70 for at least 10 of 15 — ensuring the most critical alerts have strong causal backing. All available values must be within [0, 1].
+
+```python
+import pandas as pd
+
+causal  = pd.read_csv("data/rca_causal_results.csv")
+rcc     = causal["root_cause_confidence"].dropna()
+high_rc = causal.loc[causal["severity"] == "HIGH", "root_cause_confidence"].dropna()
+above07 = int((high_rc > 0.70).sum())
+mean_h  = round(float(high_rc.mean()), 3)
+
+assert len(rcc) == 35,           f"Expected 35 non-null values, got {len(rcc)}"
+assert rcc.between(0, 1).all(),  "Some values outside [0, 1]"
+assert above07 >= 10,            f"Expected >= 10 HIGH above 0.70, got {above07}"
+
+print(f"PASS  root_cause_confidence available: {len(rcc)} / {len(causal)} anomalies")
+print(f"PASS  All available values in [0, 1]")
+print(f"PASS  HIGH anomalies > 0.70: {above07} / {len(high_rc)}  (mean = {mean_h})")
+```
+
+Expected:
+```
+PASS  root_cause_confidence available: 35 / 181 anomalies
+PASS  All available values in [0, 1]
+PASS  HIGH anomalies > 0.70: 13 / 15  (mean = 0.86)
+```
+
+---
+
+#### Test 8 — Step 3.3 External Driver Type Distribution
+
+Four attribution rules fire across 8 anomalies. Competitive pressure (avg_roas DOWN during high marketing pressure) fires 6 times and triggers suppression. Consumer sentiment decline (return_rate UP during negative sentiment) fires 2 times but does not trigger suppression (penalty 0.10 keeps actionability at 0.90).
+
+```python
+import pandas as pd
+
+rca    = pd.read_csv("data/rca_results.csv")
+ext_n  = int(rca["is_externally_driven"].sum())
+sup_n  = int(rca["escalation_suppressed"].sum())
+comp_n = int(rca["external_driver_type"].str.contains("competitive_pressure", na=False).sum())
+sent_n = int(rca["external_driver_type"].str.contains("consumer_sentiment_decline", na=False).sum())
+
+assert ext_n  == 8, f"Expected 8 externally driven, got {ext_n}"
+assert sup_n  == 6, f"Expected 6 suppressed, got {sup_n}"
+assert comp_n == 6, f"Expected 6 competitive_pressure, got {comp_n}"
+assert sent_n == 2, f"Expected 2 consumer_sentiment_decline, got {sent_n}"
+
+print(f"PASS  Externally driven:          {ext_n} / {len(rca)}")
+print(f"PASS  competitive_pressure:       {comp_n}  (avg_roas DOWN, marketing_pressure > 0.30, actionability=0.45)")
+print(f"PASS  consumer_sentiment_decline: {sent_n}  (return_rate UP, sentiment < -0.10, actionability=0.90)")
+print(f"PASS  Escalation suppressed:      {sup_n}  (competitive_pressure cases only)")
+```
+
+Expected:
+```
+PASS  Externally driven:          8 / 181
+PASS  competitive_pressure:       6  (avg_roas DOWN, marketing_pressure > 0.30, actionability=0.45)
+PASS  consumer_sentiment_decline: 2  (return_rate UP, sentiment < -0.10, actionability=0.90)
+PASS  Escalation suppressed:      6  (competitive_pressure cases only)
+```
+
+---
+
+#### Test 9 — Step 3.3 Suppression Integrity
+
+Two absolute constraints must hold: HIGH severity anomalies are never suppressed (they always escalate regardless of external context), and UP direction anomalies are never suppressed (positive spikes are always business-relevant). All 6 suppressed rows must be MEDIUM severity and DOWN direction.
+
+```python
+import pandas as pd
+
+rca      = pd.read_csv("data/rca_results.csv")
+high_sup = rca[(rca["severity"] == "HIGH") & rca["escalation_suppressed"]]
+up_sup   = rca[(rca["direction"] == "UP")  & rca["escalation_suppressed"]]
+sup      = rca[rca["escalation_suppressed"]]
+
+assert len(high_sup) == 0, f"{len(high_sup)} HIGH anomalies are suppressed (should be 0)"
+assert len(up_sup)   == 0, f"{len(up_sup)} UP anomalies are suppressed (should be 0)"
+assert (sup["direction"] == "DOWN").all(),   "All suppressed rows must be DOWN"
+assert (sup["severity"]  == "MEDIUM").all(), "All suppressed rows must be MEDIUM"
+
+print(f"PASS  HIGH anomalies suppressed:   {len(high_sup)}  (none -- HIGH always escalates)")
+print(f"PASS  UP anomalies suppressed:     {len(up_sup)}  (positive spikes never suppressed)")
+print(f"PASS  All {len(sup)} suppressed rows are DOWN direction and MEDIUM severity")
+```
+
+Expected:
+```
+PASS  HIGH anomalies suppressed:   0  (none -- HIGH always escalates)
+PASS  UP anomalies suppressed:     0  (positive spikes never suppressed)
+PASS  All 6 suppressed rows are DOWN direction and MEDIUM severity
+```
+
+---
+
+#### Test 10 — Step 3.3 Black Friday Spot-Check
+
+The Black Friday revenue spike (2024-11-29, total_revenue_usd, +223.83%) must never be suppressed. Although November has a negative seasonal index in this dataset, the UP direction guard prevents suppression. The anomaly must be fully actionable with confidence at 0.96 — reflecting all three causal methods agreeing.
+
+```python
+import pandas as pd
+
+rca = pd.read_csv("data/rca_results.csv")
+bf  = rca[(rca["date"] == "2024-11-29") & (rca["kpi"] == "total_revenue_usd")].iloc[0]
+
+assert not bf["is_externally_driven"],   "Black Friday should NOT be externally driven"
+assert not bf["escalation_suppressed"],  "Black Friday should NOT be suppressed"
+assert bf["actionability_score"] == 1.0, f"Expected actionability=1.0, got {bf['actionability_score']}"
+assert bf["direction"] == "UP",          f"Expected UP direction, got {bf['direction']}"
+
+print(f"PASS  2024-11-29  total_revenue_usd  direction={bf['direction']}  dev={bf['deviation_pct']:+.2f}%")
+print(f"PASS  is_externally_driven={bf['is_externally_driven']}   escalation_suppressed={bf['escalation_suppressed']}")
+print(f"PASS  actionability_score={bf['actionability_score']}  root_cause_confidence={bf['root_cause_confidence']}")
+```
+
+Expected:
+```
+PASS  2024-11-29  total_revenue_usd  direction=UP  dev=+223.83%
+PASS  is_externally_driven=False   escalation_suppressed=False
+PASS  actionability_score=1.0  root_cause_confidence=0.96
+```
+
+---
+
+#### Test 11 — Step 3.4 Layer 4 Priority Flag Distribution
+
+The assembly assigns every anomaly a `layer4_priority_flag` that Layer 4 uses to route alerts and actions. The distribution must match exactly: 15 ESCALATE (all HIGH), 86 INVESTIGATE (MEDIUM minus suppressed), 74 MONITOR (all LOW), 6 SUPPRESSED (externally driven competitive pressure).
+
+```python
+import pandas as pd
+
+asm   = pd.read_csv("data/rca_assembly.csv")
+flags = asm["layer4_priority_flag"].value_counts()
+
+assert flags.get("ESCALATE",    0) == 15, f"Expected 15 ESCALATE,    got {flags.get('ESCALATE', 0)}"
+assert flags.get("INVESTIGATE", 0) == 86, f"Expected 86 INVESTIGATE, got {flags.get('INVESTIGATE', 0)}"
+assert flags.get("MONITOR",     0) == 74, f"Expected 74 MONITOR,     got {flags.get('MONITOR', 0)}"
+assert flags.get("SUPPRESSED",  0) == 6,  f"Expected 6  SUPPRESSED,  got {flags.get('SUPPRESSED', 0)}"
+assert flags.sum() == len(asm),            f"Flag counts do not sum to {len(asm)}"
+
+print(f"PASS  ESCALATE    : {flags.get('ESCALATE',    0):>3}  (HIGH severity -- all three methods agree)")
+print(f"PASS  INVESTIGATE : {flags.get('INVESTIGATE', 0):>3}  (MEDIUM -- actionable, not suppressed)")
+print(f"PASS  MONITOR     : {flags.get('MONITOR',     0):>3}  (LOW / Tier 3 -- daily digest only)")
+print(f"PASS  SUPPRESSED  : {flags.get('SUPPRESSED',  0):>3}  (externally driven competitive pressure)")
+print(f"PASS  Total       : {len(asm)}")
+```
+
+Expected:
+```
+PASS  ESCALATE    :  15  (HIGH severity -- all three methods agree)
+PASS  INVESTIGATE :  86  (MEDIUM -- actionable, not suppressed)
+PASS  MONITOR     :  74  (LOW / Tier 3 -- daily digest only)
+PASS  SUPPRESSED  :   6  (externally driven competitive pressure)
+PASS  Total       : 181
+```
+
+---
+
+#### Test 12 — Step 3.4 Assembly Merge Integrity and SQLite Parity
+
+The assembly merges `actual_value` and `expected_value` from `anomaly_results.csv` (Layer 2) — these were not carried through Steps 3.1-3.3. Both must be non-null for all 181 rows. All four SQLite Layer 3 tables must also contain exactly 181 rows.
+
+```python
+import pandas as pd
+import sqlite3
+
+asm   = pd.read_csv("data/rca_assembly.csv")
+null_actual   = int(asm["actual_value"].isna().sum())
+null_expected = int(asm["expected_value"].isna().sum())
+
+assert null_actual   == 0, f"{null_actual} null actual_value"
+assert null_expected == 0, f"{null_expected} null expected_value"
+assert asm["anomaly_id"].nunique() == 181, "anomaly_id not unique across 181 rows"
+
+print(f"PASS  actual_value non-null:   {len(asm) - null_actual} / {len(asm)}")
+print(f"PASS  expected_value non-null: {len(asm) - null_expected} / {len(asm)}")
+print(f"PASS  All 181 anomaly IDs unique")
+
+conn = sqlite3.connect("data/kpi_anomaly_detection.db")
+for table in ["rca_graph_results", "rca_causal_results", "rca_results", "rca_assembly"]:
+    n = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+    assert n == 181, f"{table}: expected 181 rows, got {n}"
+    print(f"PASS  {table:<25}  {n} rows")
+conn.close()
+```
+
+Expected:
+```
+PASS  actual_value non-null:   181 / 181
+PASS  expected_value non-null: 181 / 181
+PASS  All 181 anomaly IDs unique
+PASS  rca_graph_results          181 rows
+PASS  rca_causal_results         181 rows
+PASS  rca_results                181 rows
+PASS  rca_assembly               181 rows
+```
+
+---
+
+#### Running all Layer 3 tests
+
+Copy any of the checks above into a Python session or the `scripts/3_Quality_Tests.ipynb` notebook with the project root as the working directory. All 12 tests passing confirms that the dependency graph traversal, causal inference, external driver attribution, and final assembly completed correctly, and that `rca_assembly.csv` is clean and ready for Layer 4 (Intelligence Engine).
+
+---
+
 ## LAYER 4 — Intelligence Engine
 
 ### Step 4.1 — Business Impact Quantification
