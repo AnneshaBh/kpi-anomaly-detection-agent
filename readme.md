@@ -391,37 +391,81 @@ Tier 3 (Daily digest):         total_clicks, sessions, inventory_health, avg_dis
 
 **Method A — Statistical Baseline (fast, interpretable)**
 
-```
-For each Tier 1 KPI on each new day:
-  1. Compute rolling_mean and rolling_std over past 28 days
-  2. Apply STL seasonal decomposition → isolate residual component
-  3. Flag if residual Z-score > ±2.5 (configurable per KPI)
-  4. Flag if WoW change > ±20% AND MoM change > ±15% simultaneously
-```
+Three independent sub-flags computed for every tiered KPI across all 731 days. `method_a_flag = A1 OR A2 OR A3`. Runs on all 12 tiered KPIs producing 8,772 KPI-day rows.
+
+| Flag | Signal | Threshold |
+|---|---|---|
+| A1 | 7-day rolling Z-score (pre-computed in Layer 1) | Tier 1/2: `|z| > 2.5` · Tier 3: `|z| > 3.0` |
+| A2 | STL residual Z-score — 28-day rolling Z applied to the STL irregular component | Same per-tier threshold as A1 |
+| A3 | WoW + MoM simultaneous breach — both must exceed threshold at the same time | Tier 1/2: WoW > ±20% AND MoM > ±15% · Tier 3: WoW > ±25% AND MoM > ±20% |
+
+**STL configuration:** `STL(series, period=7, robust=True)` — period 7 captures the weekly seasonality cycle; `robust=True` down-weights outlier influence so that a spike does not distort the seasonal fit. The residual rolling window is 28 days, `min_periods=7`.
+
+**Key finding in this dataset:** The maximum `|z_score|` across all 12 KPIs and 731 days is **2.268**, which sits below the ±2.5 detection threshold. **Flag A1 fires zero times.** The 7-day rolling window tracks the series closely, compressing deviations. STL (A2) is the primary detection signal — it separates trend and seasonality from the residual before computing Z-scores, allowing it to catch anomalies that a short rolling window masks.
+
+**Designed for recall = 1.000.** Method A is the over-sensitive first pass. At least one KPI fires on all 20 ground-truth anomaly days, producing zero false negatives. The 1,886 total `method_a_flag` fires across 8,772 KPI-day pairs include many normal days — the ensemble in Step 2.3 filters these by requiring a second method to corroborate.
+
+| Flag | Total fires | Notes |
+|---|---|---|
+| A1 (rolling z-score) | 0 | Max |z| = 2.268 — never breaches ±2.5 threshold in this dataset |
+| A2 (STL residual z) | 367 | Primary signal — STL residual z is more sensitive than the raw rolling z |
+| A3 (WoW+MoM) | 1,602 | Catches structural drift across calendar periods |
+| method_a_flag (OR) | 1,886 | Overlaps between A2/A3 mean total < 367+1602 |
+
+---
 
 **Method B — Isolation Forest (unsupervised ML)**
 
-Runs on all 33 KPIs as a joint feature matrix. Catches correlated multi-KPI anomalies (e.g. sessions up but conversion_rate down) that individual-KPI checks miss.
+Operates on **29 raw KPI columns** from `master_dataset.csv` as a joint feature matrix. All Layer 1 engineered features (`_rolling_mean`, `_rolling_std`, `_z_score`, `_wow_change`, `_mom_change`, `_lag_1`) are explicitly excluded — the model sees only the original daily KPI values. All 29 raw KPI columns contain zero NaN values, so no imputation is required.
+
+Catches correlated multi-KPI anomalies (e.g. `sessions` spiking while `conversion_rate` drops) that individual-column univariate checks miss because Isolation Forest separates data points by randomly partitioning the full joint feature space.
 
 ```python
-IsolationForest(contamination=0.05, n_estimators=100)
-# Train on first 80% of dataset, score new daily rows
+# StandardScaler fitted on train set only — prevents data leakage into the score set
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X[0:n_train])   # fit on train only
+X_scaled = scaler.transform(X)                         # transform all 731 rows
+
+clf = IsolationForest(contamination=0.05, n_estimators=100, random_state=42)
+clf.fit(X_train_scaled)
+# Train rows: 0–583  (first 80%, 2024-01-01 to ~2025-07-31)
+# Score rows: all 731  (full in-sample historical audit)
+
+# Anomaly score: negate decision_function — higher score = more anomalous
+scores = -clf.decision_function(X_scaled)
 ```
+
+Each flagged day includes `top_5_features` — the 5 raw KPI columns with the largest standardized absolute deviation on that day — providing an interpretability anchor for the otherwise black-box decision.
+
+**Score separation:** All 34 flagged days have strictly positive anomaly scores; all 697 non-flagged days have strictly negative scores — clean split at 0 with zero overlap at the decision boundary.
+
+**Output unit:** one flag per **day** (not per KPI). 34 days flagged = 4.7% of the 731-day dataset.
+
+---
 
 **Method C — Prophet (time-series forecasting)**
 
-```
-For each Tier 1 KPI:
-  Train Prophet with:
-    - weekly_seasonality = True
-    - yearly_seasonality = True
-    - regressors: economic_index, seasonal_index, marketing_pressure
-  Flag if actual falls outside 95% prediction interval
+Runs on the **4 Tier 1 KPIs only** (`total_revenue_usd`, `n_orders`, `avg_roas`, `conversion_rate`). Each model is fit on all 731 days and scored in-sample (full historical audit — 2,924 rows total: 4 KPIs × 731 days).
+
+```python
+Prophet(
+    interval_width=0.95,           # 95% prediction interval
+    weekly_seasonality=True,
+    yearly_seasonality=True,
+    daily_seasonality=False,
+    changepoint_prior_scale=0.05,  # moderate trend flexibility (Prophet default)
+    seasonality_prior_scale=10.0,  # seasonality amplitude (Prophet default)
+)
+# Regressors: economic_index, seasonal_index, marketing_pressure
+# Flag rule: actual < yhat_lower  OR  actual > yhat_upper
+# Output per row: yhat, yhat_lower, yhat_upper, deviation_pct, direction (UP/DOWN/NORMAL)
 ```
 
-Best for structural breaks and holiday/seasonal anomalies because it explicitly uses `seasonal_index` as a regressor.
+Explicitly decomposes trend + weekly seasonality + yearly seasonality + 3 exogenous regressors — making it the strongest method for catching structural breaks and holiday events. The 95% prediction interval achieves 100% coverage on non-anomaly days for `total_revenue_usd`, `n_orders`, and `conversion_rate`. `avg_roas` reaches 94.5% (its high natural volatility causes some normal days to fall outside the 95% CI — statistically expected).
 
-**Method D — LSTM Autoencoder (optional, deep learning)**
+---
+
+**Method D — LSTM Autoencoder (planned, not yet implemented)**
 
 ```
 Trained on 14-day sliding windows across all Tier 1 KPIs
@@ -429,31 +473,58 @@ Flag if reconstruction error > learned threshold
 Best for: subtle gradual drift that statistical methods miss
 ```
 
+Reserved for Layer 2 extension once Layers 1–3 are in production.
+
 ### Step 2.3 — Ensemble Voting
 
-```
-Anomaly confirmed if:  ≥ 2 of 4 methods agree  (configurable)
+Method A covers all 12 tiered KPIs; Method B is day-level (one flag per date, broadcast to all KPIs on a flagged date); Method C covers Tier 1 KPIs only. Maximum possible votes per tier:
 
-Severity:
-  HIGH   → all 4 methods agree  OR  Tier 1 KPI with Z-score > 3.5
-  MEDIUM → 2–3 methods agree    OR  Tier 2 KPI flagged
-  LOW    → 1 method only, Tier 3 KPI
+| Tier | Methods available | Max votes |
+|---|---|---|
+| Tier 1 | A + B + C | 3 |
+| Tier 2 | A + B (C not available) | 2 |
+| Tier 3 | A + B (C not available) | 2 |
+
+```
+Anomaly confirmed if:  votes ≥ 2  (at least 2 methods agree)
+
+Severity assignment:
+  HIGH    → Tier 1, all 3 methods agree  (votes == 3)
+  MEDIUM  → Tier 1 with 2 methods agree  OR  Tier 2 confirmed (A + B)
+  LOW     → Tier 3 confirmed (A + B)
 ```
 
-**Anomaly output schema:**
+**Method comparison (day-level evaluation, 20 labeled ground-truth anomaly days)**
+
+| Method | Flagged days | TP | FP | FN | Precision | Recall | F1 |
+|---|---|---|---|---|---|---|---|
+| A — Statistical Baseline | 696 | 20 | 676 | 0 | 0.029 | **1.000** | 0.056 |
+| B — Isolation Forest | 34 | 8 | 26 | 12 | 0.235 | 0.400 | 0.296 |
+| C — Prophet | 47 | 8 | 39 | 12 | 0.170 | 0.400 | 0.239 |
+| **Ensemble (≥2 methods)** | 68 | 12 | 56 | 8 | 0.176 | 0.600 | 0.271 |
+
+Method A is designed for perfect recall at the cost of precision. The ensemble's ≥2 requirement filters Method A's 676 false positives by requiring B or C to corroborate, at the cost of 8 additional false negatives — anomaly days that only Method A detected (Methods B and C both missed them).
+
+**Anomaly output schema (`anomaly_results.csv`, 181 confirmed KPI-day records):**
 
 ```json
 {
+  "anomaly_id": "ANO-20240315-ORD",
   "date": "2024-03-15",
-  "kpi": "total_revenue_usd",
+  "kpi": "n_orders",
+  "tier": 1,
+  "severity": "MEDIUM",
+  "votes": 2,
+  "methods_flagged": "statistical, isolation_forest",
   "direction": "DOWN",
-  "severity": "HIGH",
-  "actual_value": 7821.0,
-  "expected_value": 11400.0,
-  "deviation_pct": -31.4,
-  "z_score": -3.8,
-  "methods_flagged": ["statistical", "prophet", "isolation_forest"],
-  "anomaly_id": "ANO-2024-0315-REV-001"
+  "actual_value": 148.0,
+  "expected_value": 229.9,
+  "deviation_pct": -35.7,
+  "z_score": -1.9,
+  "method_b_score": 0.0189,
+  "yhat": null,
+  "yhat_lower": null,
+  "yhat_upper": null
 }
 ```
 
@@ -461,7 +532,7 @@ Severity:
 
 ## Step 2.4 — Layer 2 Quality Tests
 
-Run these checks after executing all four Layer 2 scripts to confirm the detection pipeline produced valid outputs. All inputs (`processed_kpi_features.csv`, `method_a_results.csv`, `method_b_results.csv`, `method_c_results.csv`, `anomaly_results.csv`, `ensemble_voting_matrix.csv`) must exist before running.
+Run these checks after executing all five Layer 2 scripts (`2.1_KPI_Monitoring_Tiers.py`, `2.2A_Statistical_Baseline.py`, `2.2B_Isolation_Forest.py`, `2.2C_Prophet.py`, `2.3_Ensemble_Voting.py`) to confirm the detection pipeline produced valid outputs. All inputs (`processed_kpi_features.csv`, `method_a_results.csv`, `method_b_results.csv`, `method_c_results.csv`, `anomaly_results.csv`, `ensemble_voting_matrix.csv`) must exist before running.
 
 ---
 
@@ -846,61 +917,181 @@ Copy any of the checks above into a Python session with the project root as the 
 
 ## LAYER 3 — Root Cause Analysis
 
+Four scripts run sequentially, each adding columns to the prior output. The final product is `rca_assembly.csv` (181 rows, 45 columns) — the Layer 4 input.
+
+| Script | Output file | Shape | Key additions |
+|---|---|---|---|
+| `3.1_dependency_graph.py` | `rca_graph_results.csv` | 181 × 18 | `dependency_chain`, `suspected_driver_kpi`, `graph_depth_reached`, `co_anomalous_kpis` |
+| `3.2_causal_inference.py` | `rca_causal_results.csv` | 181 × 40 | `ci_*`, `dw_*`, `root_cause_confidence`, `causal_summary` |
+| `3.3_external_drivers.py` | `rca_results.csv` | 181 × 52 | `is_externally_driven`, `external_driver_type`, `actionability_score`, `escalation_suppressed`, `rca_narrative` |
+| `3.4_rca_assembly.py` | `rca_assembly.csv` | 181 × 45 | `rca_completeness_score`, `confidence_tier`, `layer4_priority_flag` (curated handoff for Layer 4) |
+
+---
+
 ### Step 3.1 — Dependency Graph Drill-Down
 
-When a Tier 1 KPI anomaly is confirmed, the agent traverses a pre-defined dependency graph to find the upstream driver:
+**Implementation:** `networkx.DiGraph` with edges running **effect → cause** (the direction of investigation when an anomaly fires). The graph is a DAG — `nx.is_directed_acyclic_graph` is asserted on startup; multiple parents are valid (e.g. `bounce_rate` is a child of both `sessions` and `conversion_rate`).
+
+**Complete graph structure:**
 
 ```
-Revenue Anomaly
-    ├── Is n_orders anomalous?          → demand problem
-    │       ├── Is sessions anomalous?  → traffic problem
-    │       │       └── Is bounce_rate high? → campaign / landing page problem
-    │       └── Is conversion_rate anomalous? → checkout / UX problem
-    ├── Is avg_order_value anomalous?   → basket size / discount problem
-    │       └── Is avg_discount_pct high? → promo leak / pricing error
-    └── Is return_rate anomalous?       → product quality / fulfillment problem
+total_revenue_usd  →  n_orders            →  sessions       →  bounce_rate
+                                           →  conversion_rate  →  bounce_rate
+                                           →  n_stockouts    →  inventory_health
+                                           →  conversion_rate  →  avg_discount_pct
+                   →  avg_order_value_usd  →  avg_discount_pct
+                   →  return_rate
+
+avg_roas           →  total_clicks
+
+conversion_rate    →  bounce_rate
+                   →  avg_discount_pct
 ```
 
-A separate dependency graph is defined for each Tier 1 KPI (ROAS, conversion rate, stockouts).
+**Traversal algorithm (Tier 1 anomalies only):**
+
+```
+DFS from the anomalous KPI following outgoing edges:
+  At each node:
+    1. Collect all child KPIs where |z_score| >= Z_WATCH_THRESHOLD (1.5) on the anomaly date
+    2. If multiple qualifying children: pick the one with the highest |z_score|
+    3. Append to path and continue from that child
+    4. Stop when: no qualifying child exists  OR  leaf node reached
+  suspected_driver_kpi = path[-1]
+  graph_depth_reached  = len(path) - 1
+```
+
+`Z_WATCH_THRESHOLD = 1.5` — softer than the detection threshold (2.5/3.0) to allow partial co-movements to count as directional evidence during traversal.
+
+**Tier 2/3 anomalies** receive no traversal — they are already mid-level or leaf-level causes. Their record is assigned `traversal_stopped = "tier_2_3_no_traversal"` and `affected_tier1_kpis` is populated by running `nx.ancestors(G, kpi)` — identifying which Tier 1 outcomes this sub-KPI feeds into.
+
+**Traversal stop reason breakdown (181 total):**
+
+| Reason | Count | Meaning |
+|---|---|---|
+| `tier_2_3_no_traversal` | 93 | Tier 2/3 anomaly — already the driver |
+| `no_anomalous_child` | 73 | No child KPI above `|z| >= 1.5` on this date |
+| `leaf_node_reached` | 15 | Traversal reached a terminal node (no outgoing edges) |
+
+**Depth distribution (88 Tier 1 anomalies):** depth=0: 62 · depth=1: 22 · depth=2: 4
+
+---
 
 ### Step 3.2 — Causal Inference
 
-**CausalImpact** (Bayesian structural time series) quantifies how much a suspected driver caused the outcome:
+Two complementary methods quantify how much the suspected upstream driver (from Step 3.1) actually caused each confirmed anomaly.
+
+**CausalImpact (MLE-based structural time series) — HIGH severity anomalies only**
+
+Uses `causalimpact 0.2.6` with `estimation="MLE"` — backed by `statsmodels UnobservedComponents`, not PyMC/MCMC. Fits a state-space model on the pre-period using the 4 exogenous controls as covariates, then projects a counterfactual into the post-period.
 
 ```python
 CausalImpact(
-    data=df[['total_revenue_usd', 'avg_roas', 'sessions', 'consumer_sentiment']],
-    pre_period=[start_date, anomaly_date - 1],
-    post_period=[anomaly_date, anomaly_date + 3]
+    data=df[[outcome_kpi, "economic_index", "seasonal_index",
+             "marketing_pressure", "consumer_sentiment"]],
+    pre_period=[0, anomaly_idx - 1],   # all rows before the anomaly date
+    post_period=[anomaly_idx, anomaly_idx + 3],  # 4-day post window
+    estimation="MLE",
 )
-# Output: "avg_roas decline explains 67% of revenue drop (89% posterior confidence)"
+# Minimum pre-period: 30 rows (ANO-20240111-ROAS skipped — only 10 rows available)
+# Significance: 95% CI excludes zero  (lo > 0 OR hi < 0)
+# Pseudo-posterior: P(true effect ≠ 0) via normal CDF of |effect| / std
 ```
 
-**DoWhy** builds a causal DAG from domain knowledge:
+Runs on 14 of 15 HIGH anomalies (1 skipped for insufficient pre-period). 6 of 14 show statistically significant cumulative effects.
+
+**DoWhy (structural causal DAG, backdoor linear regression) — HIGH + MEDIUM with distinct driver**
+
+```python
+# Causal DAG (cause → effect direction, opposite of the dependency graph):
+# economic_index → consumer_sentiment → sessions → conversion_rate → n_orders → total_revenue_usd
+# marketing_pressure → avg_roas → total_revenue_usd
+# seasonal_index → n_orders, sessions
+# inventory_health → n_stockouts → n_orders
+# bounce_rate → sessions
+# avg_discount_pct → conversion_rate, avg_order_value_usd
+
+CausalModel(data=df, treatment=driver_kpi, outcome=anomaly_kpi, graph=CAUSAL_DAG)
+# Strategy: backdoor.linear_regression, target_units="ate"
+# Refutation: random_common_cause with 5 simulations
+#   high refutation p-value → new_effect close to original → estimate is robust
+```
+
+**Key efficiency design:** DoWhy runs **once per unique (driver, outcome) pair** (7 unique pairs across 26 anomalies), not once per anomaly. The ATE coefficient is cached and then scaled by each anomaly's observed driver deviation:
 
 ```
-economic_index ──→ consumer_sentiment ──→ sessions ──→ conversion_rate ──→ revenue
-marketing_pressure ──→ avg_roas ──→ total_attributed_revenue ──→ revenue
-seasonal_index ──→ n_orders ──→ revenue
-inventory_health ──→ n_stockouts ──→ n_orders ──→ revenue
+estimated_contribution = ATE_coeff × (driver_actual - driver_rolling_mean)
+dw_effect_pct = estimated_contribution / |outcome_rolling_mean| × 100
 ```
+
+All 26 runs pass the random common cause refutation — estimates are robust to unobserved confounding.
+
+**Blended confidence score:**
+
+```
+root_cause_confidence = 0.6 × ci_confidence + 0.4 × dw_confidence
+# Falls back to whichever single method ran when only one is available
+# Available for 35 of 181 anomalies (those where ≥1 causal method ran)
+# Mean for HIGH anomalies: 0.86  |  ≥10 of 15 HIGH anomalies exceed 0.70
+```
+
+**Narrative format (stored in `causal_summary`):**
+```
+"{kpi} moved {direction} {deviation:+.1f}% on {date}; suspected driver: {driver}.
+ CausalImpact: {ci_relative_effect_pct:+.1f}% cumulative effect (significant/uncertain).
+ DoWhy: {driver} explains {dw_effect_pct:+.1f}% of expected outcome (robust/unverified)."
+```
+
+---
 
 ### Step 3.3 — External Driver Attribution
 
-Before escalating any anomaly, the agent checks whether it is externally driven (macro, seasonal) and therefore not actionable:
+Checks whether each anomaly is driven by forces outside the business's control. Anomalies fully explained by external forces are flagged for escalation suppression so Layer 4 focuses human attention on actionable root causes.
+
+**Four attribution rules (thresholds adapted to the actual dataset range):**
+
+| Rule | Condition | Applies to | Penalty | Suppresses? |
+|---|---|---|---|---|
+| 1 — Macro contraction | `economic_index < -0.10` (spec: -0.30, never reached; min = -0.194) | Revenue/order KPIs, DOWN only | -0.55 | Yes (actionability → 0.45) |
+| 2 — Competitive pressure | `marketing_pressure > 0.30` (spec: 0.50; only 8 anomaly dates exceed 0.50) | `avg_roas`, DOWN only | -0.55 | Yes (actionability → 0.45) |
+| 3 — Seasonal trough | `seasonal_index < -0.10` (unchanged from spec) | `n_orders`, DOWN only; UP anomalies always pass | -0.55 | Yes |
+| 4 — Consumer sentiment | `consumer_sentiment < -0.10` | `return_rate`, UP direction | -0.10 | No (actionability stays at 0.90) |
+
+**Suppression conditions — ALL four must be true:**
 
 ```
-If economic_index < -0.3 AND revenue_anomaly:
-    → "Macro-driven decline — not actionable internally"
-
-If marketing_pressure > 0.5 AND roas_anomaly:
-    → "Competitive pressure driving ROAS degradation"
-
-If seasonal_index < -0.1 AND orders_anomaly:
-    → "Expected seasonal trough — monitor but do not alarm leadership"
+is_externally_driven = True   AND
+direction = DOWN              AND   (positive spikes are never suppressed)
+severity != HIGH              AND   (HIGH anomalies always escalate regardless of context)
+actionability_score < 0.50
 ```
 
-This suppresses false escalations and focuses human attention on actionable root causes.
+**Results in this dataset:** 8 externally driven anomalies — 6 suppressed (`avg_roas` DOWN with `marketing_pressure > 0.30`), 2 flagged but not suppressed (`return_rate` UP with `consumer_sentiment < -0.10`, penalty too small to breach suppression threshold).
+
+---
+
+### Step 3.4 — RCA Assembly
+
+Assembles the three intermediate outputs (Steps 3.1–3.3) into a single curated table for Layer 4 consumption. Runs 12 quality tests internally; only writes output if all 12 pass.
+
+**Three derived metadata columns added:**
+
+| Column | Type | Values | Logic |
+|---|---|---|---|
+| `rca_completeness_score` | int | 0–3 | `int(depth>0) + int(ci_ran) + int(dw_ran)` — how many RCA signals are available |
+| `confidence_tier` | str | HIGH / MEDIUM / LOW / UNAVAILABLE | Based on `root_cause_confidence`: HIGH ≥ 0.80, MEDIUM ≥ 0.60, LOW ≥ 0.40, else UNAVAILABLE |
+| `layer4_priority_flag` | str | ESCALATE / INVESTIGATE / MONITOR / SUPPRESSED | Routes each anomaly to the correct Layer 4/5 handling path |
+
+**Layer 4 priority flag distribution (181 anomalies):**
+
+| Flag | Count | Routing logic |
+|---|---|---|
+| ESCALATE | 15 | HIGH severity — all three methods agree |
+| INVESTIGATE | 86 | MEDIUM severity, actionable, not suppressed |
+| MONITOR | 74 | LOW severity (Tier 3) — daily digest only |
+| SUPPRESSED | 6 | Externally driven competitive pressure — no escalation |
+
+The assembly also re-merges `actual_value` and `expected_value` from `anomaly_results.csv` — these columns were not carried through Steps 3.1–3.3 but are required by Layer 4 for dollar impact calculations.
 
 ---
 
