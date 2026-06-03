@@ -2,8 +2,11 @@
 Annesha_Mentorship_Plan.xlsx
 ecommerce_dataset_1year_10000_customers.xlsx
 
-# Power BI build guide (local reference only)
+# Power BI build guide and local HTML artefacts (local reference only)
 powerbibuild.md
+infographic_executive.html
+infographic_technical.html
+powerbi_dashboard_mockup.html
 
 # Claude Code assistant internals
 .claude/
