@@ -1,0 +1,35 @@
+DAILY KPI ANOMALY BRIEF - 2024-08-20
+==================================
+
+SITUATION OVERVIEW
+The anomaly detection ensemble flagged 6 anomalies on 2024-08-20, all attributed to a confirmed "back_to_school_surge" event. Two HIGH severity Tier 1 anomalies — total_revenue_usd (+49.1%) and n_orders (+50.9%) — represent a significant positive demand spike driven by elevated session volumes (root cause confidence: 96%). Simultaneously, avg_roas declined -53.1% (MEDIUM), signaling that marketing spend efficiency has not kept pace with the demand surge, representing a $13,061 weekly revenue-at-risk / $55,978 monthly shortfall if unaddressed. Total positive revenue uplift from the surge is estimated at +$52,190 for the week (+$223,670 monthly, 63.6% above plan).
+
+HIGH PRIORITY ALERTS  (2 anomalies)
+- total_revenue_usd UP +49.1% | Root cause: sessions surge (dependency chain: total_revenue_usd -> n_orders -> sessions) | Revenue uplift: +$52,190 this week / +$223,670 monthly (63.6% above plan) | Root cause confidence: 96% | Causal Impact effect: +31% (CI confidence: 100%) | DoWhy ATE: +11% (refutation passed)
+  Action: Verify real-time inventory levels across top 50 SKUs by revenue contribution; cross-check order fulfillment rate vs. stockout incidents; validate session-to-order attribution in analytics pipeline for data integrity anomalies. | Owner: Revenue Operations + Supply Chain
+
+- n_orders UP +50.9% | Root cause: sessions surge (dependency chain: n_orders -> sessions) | Revenue uplift: +$50,152 this week / +$214,936 monthly (61.2% above plan) | Root cause confidence: 96% | Causal Impact effect: +29% (CI confidence: 100%) | DoWhy ATE: +18% (refutation passed)
+  Action: Verify order fulfillment SLA capacity: confirm warehouse can process 370 orders (50.9% above 245 baseline) within standard 2-day shipping window; if at-risk, activate backup fulfillment partner or split shipments across 3PLs. | Owner: Revenue Operations + Supply Chain
+
+MEDIUM PRIORITY OBSERVATIONS  (1 anomaly)
+- avg_roas DOWN -53.1%: avg_roas is self-driven (no deeper upstream driver above watch threshold; dependency chain terminates at avg_roas). Despite the overall revenue surge, marketing ROAS is underperforming — likely attributable to inflated ad spend during the back-to-school competitive window without proportional conversion uplift. Revenue at risk: $13,061/week, $55,978/month (15.9% below plan). Root cause confidence: N/A (self-driven, CausalImpact not applicable). Actionability: HIGH. [ACTIVE — Email QUEUED to Operations + Analyst for 2024-08-21 08:00]
+
+SUPPRESSED ALERTS  (0)
+None. All anomalies have escalation_suppressed = False. No external driver suppression conditions were met (marketing_pressure = 0.20, below the 0.30 suppression threshold; external_driver_type = "none" for all anomalies).
+
+LOW SEVERITY SIGNALS  (3 anomalies)
+Three Tier 3 background signals were detected, all directionally consistent with the back_to_school_surge event and routed to the weekly analyst digest (scheduled 2024-08-26):
+  - sessions UP +6.22% (z=1.508) — corroborated root cause driver for REV and ORD surges; warrants monitoring for sustained elevation into the week. [SCHEDULED — Digest, Analyst]
+  - inventory_health UP +84.2% (z=1.374) — elevated inventory health index may reflect pre-positioned stock for the surge; monitor for rapid depletion as demand continues. [SCHEDULED — Digest, Analyst]
+  - avg_discount_pct UP +15.38% (z=1.452) — slight discount elevation (9% rate) may be contributing to conversion uplift; watch for margin erosion if discounting accelerates. [SCHEDULED — Digest, Analyst]
+
+RECOMMENDED IMMEDIATE ACTIONS
+1. [Supply Chain / Revenue Operations — URGENT] Audit inventory availability across top 50 revenue-contributing SKUs immediately. The combined 370-order volume (50.9% above baseline) and elevated inventory_health signal suggest stock is being drawn down rapidly. Fast-track reorders for SKUs below a 5-day buffer to prevent stockouts that would cap the back-to-school revenue opportunity. Activate backup fulfillment partner if warehouse SLA for 2-day shipping is at risk.
+
+2. [Performance Marketing — TODAY] Investigate avg_roas collapse of -53.1%. Audit Google Analytics 4 and Meta pixel firing on checkout pages; pause paid_search ad groups with CPA above $50; confirm no iOS privacy/attribution window changes have broken tracking. Reallocate 25% of paid_search budget (~$2,100/day) to email campaigns and social retargeting, which historically deliver higher ROAS (42x vs. 19x for paid_search).
+
+3. [Revenue Operations + Analytics — TODAY] Validate session-to-order attribution pipeline integrity. With sessions up only +6.2% but orders and revenue up ~50%, the conversion rate has spiked significantly. Confirm there are no duplicate tracking events, expanded conversion windows, or data pipeline anomalies inflating reported performance — and if the uplift is real, model the remaining back-to-school demand window (typically 2–3 additional weeks) to size the full revenue opportunity.
+
+WATCH LIST FOR TOMORROW
+- avg_roas (current z = -0.641, deviation -53.1%): Despite being MEDIUM severity today, ROAS is declining sharply against a high-spend back-to-school backdrop. If paid media spend continues to rise without proportional attributed revenue improvement, this could escalate to HIGH severity within 24–48 hours. Monitor daily ROAS vs. 30-day rolling average closely.
+- avg_discount_pct (current z = 1.452, deviation +15.38%): Discounting is creeping upward during the surge window. If promotional depth increases further to sustain conversion rates, margin erosion could become a concern even as top-line revenue remains elevated. Flag for Pricing/Promotions team review tomorrow.

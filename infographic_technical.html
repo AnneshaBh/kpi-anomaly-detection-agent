@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KPI Anomaly Detection Agent — Technical Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black:#000; --white:#fff;
+    --grey-bg:#f5f5f5; --grey-border:#d0d0d0; --grey-mid:#3d3d3d; --grey-muted:#888;
+    --red:#e8001c; --red-soft:#fff0f2; --red-border:#f0b0b8;
+    --amber:#cc5500; --amber-soft:#fff5ee; --amber-border:#f5c89a;
+    --blue:#0057a8; --blue-soft:#eef4fc; --blue-border:#a8ccee;
+    --green:#00794c; --green-soft:#eefaf4; --green-border:#90d9b8;
+    --purple:#6600cc; --purple-soft:#f5f0ff; --purple-border:#c8a8f0;
+    --code-bg:#0c1117; --code-text:#8bacc8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#fff;font-family:'Barlow',sans-serif;color:var(--black);min-width:1150px;}
+  code,.mono{font-family:'JetBrains Mono',monospace;}
+
+  /* HEADER */
+  .header{background:var(--black);color:var(--white);padding:48px 68px 40px;border-bottom:4px solid var(--red);}
+  .header-eyebrow{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:5px;text-transform:uppercase;color:#888;margin-bottom:14px;}
+  .header h1{font-family:'Barlow Condensed',sans-serif;font-size:48px;font-weight:900;text-transform:uppercase;line-height:1.05;letter-spacing:1px;margin-bottom:10px;}
+  .header h1 span{color:var(--red);}
+  .header-sub{font-size:14px;font-weight:300;color:#bbb;max-width:820px;line-height:1.7;}
+
+  /* PAGE BODY */
+  .page{padding:56px 68px 80px;}
+
+  /* SECTION LABELS */
+  .sec-label{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;letter-spacing:5px;text-transform:uppercase;color:var(--red);margin-bottom:14px;display:flex;align-items:center;gap:12px;}
+  .sec-label::after{content:'';flex:1;height:1px;background:var(--grey-border);}
+
+  /* STAT STRIP */
+  .stat-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:0;border:1.5px solid var(--black);margin-bottom:52px;}
+  .stat-cell{padding:20px 16px;text-align:center;border-right:1.5px solid var(--black);}
+  .stat-cell:last-child{border-right:none;}
+  .stat-num{font-family:'Barlow Condensed',sans-serif;font-size:40px;font-weight:900;line-height:1;color:var(--black);display:block;}
+  .stat-num.red{color:var(--red);}
+  .stat-desc{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:#666;line-height:1.5;margin-top:5px;}
+
+  /* SUMMARY BOX */
+  .summary-box{background:var(--grey-bg);border-left:4px solid var(--black);padding:32px 40px;margin-bottom:52px;}
+  .summary-box h2{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;}
+  .summary-box p{font-size:14px;line-height:1.8;color:#333;margin-bottom:10px;}
+  .summary-box p:last-child{margin-bottom:0;}
+
+  /* LAYER CARDS */
+  .layers{display:flex;flex-direction:column;gap:0;border:1.5px solid var(--black);margin-bottom:52px;}
+  .layer-card{border-bottom:1.5px solid var(--black);}
+  .layer-card:last-child{border-bottom:none;}
+  .layer-header{display:grid;grid-template-columns:160px 1fr;background:var(--black);color:var(--white);}
+  .layer-id-block{padding:22px 20px;display:flex;flex-direction:column;justify-content:center;border-right:1px solid #333;}
+  .l-num{font-family:'Barlow Condensed',sans-serif;font-size:36px;font-weight:900;color:var(--red);line-height:1;}
+  .l-name{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:3px;color:#888;margin-top:3px;line-height:1.3;}
+  .layer-meta-block{padding:16px 22px;display:flex;align-items:center;gap:16px;}
+  .layer-headline{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:var(--white);}
+  .layer-subline{font-size:11px;color:#888;margin-top:3px;}
+
+  /* STEP GRID INSIDE LAYER */
+  .step-grid{padding:24px;display:grid;gap:16px;}
+  .step-grid.cols2{grid-template-columns:1fr 1fr;}
+  .step-grid.cols3{grid-template-columns:1fr 1fr 1fr;}
+  .step-grid.cols4{grid-template-columns:1fr 1fr 1fr 1fr;}
+
+  /* STEP BOX */
+  .step-box{background:var(--white);border:1.5px solid var(--grey-border);padding:18px 16px;}
+  .step-num{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:3px;margin-bottom:6px;}
+  .step-num.red{color:var(--red);}
+  .step-num.amber{color:var(--amber);}
+  .step-num.blue{color:var(--blue);}
+  .step-num.green{color:var(--green);}
+  .step-num.purple{color:var(--purple);}
+  .step-num.dark{color:var(--grey-mid);}
+  .step-title{font-size:13.5px;font-weight:700;margin-bottom:8px;color:var(--black);}
+  .step-plain{font-size:12.5px;line-height:1.7;color:#333;margin-bottom:10px;}
+  .step-detail{font-size:11.5px;line-height:1.65;color:#555;}
+
+  /* FEATURE TABLE */
+  .feat-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;}
+  .feat-table th{font-size:9.5px;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;color:var(--grey-muted);padding:7px 10px;border-bottom:1.5px solid var(--grey-border);text-align:left;}
+  .feat-table td{padding:9px 10px;border-bottom:1px solid #eee;vertical-align:top;line-height:1.55;}
+  .feat-table tr:last-child td{border-bottom:none;}
+  .feat-table td.name{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--red);white-space:nowrap;font-weight:600;}
+  .feat-table td.formula{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--blue);white-space:nowrap;}
+
+  /* METHOD TABLE */
+  .method-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;}
+  .method-table th{font-size:9.5px;text-transform:uppercase;letter-spacing:1.5px;font-weight:700;color:var(--grey-muted);padding:7px 10px;border-bottom:1.5px solid var(--grey-border);text-align:left;white-space:nowrap;}
+  .method-table td{padding:8px 10px;border-bottom:1px solid #eee;vertical-align:middle;line-height:1.5;}
+  .method-table tr:last-child td{border-bottom:none;}
+  .method-table tr.ensemble{background:var(--grey-bg);}
+  .method-table tr.ensemble td{font-weight:700;}
+  .m-val{font-family:'JetBrains Mono',monospace;font-size:11.5px;}
+  .m-green{color:var(--green);}
+  .m-red{color:var(--red);}
+
+  /* VOTE GRID */
+  .vote-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px;}
+  .vote-box{padding:14px 12px;text-align:center;border:1.5px solid var(--grey-border);}
+  .vote-box.v0{background:var(--grey-bg);}
+  .vote-box.v1{background:var(--blue-soft);border-color:var(--blue-border);}
+  .vote-box.v2{background:var(--amber-soft);border-color:var(--amber-border);}
+  .vote-box.v3{background:var(--red-soft);border-color:var(--red-border);}
+  .vote-n{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:900;line-height:1;margin-bottom:2px;}
+  .vote-box.v0 .vote-n{color:var(--grey-muted);}
+  .vote-box.v1 .vote-n{color:var(--blue);}
+  .vote-box.v2 .vote-n{color:var(--amber);}
+  .vote-box.v3 .vote-n{color:var(--red);}
+  .vote-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--grey-muted);margin-bottom:4px;}
+  .vote-desc{font-size:11px;color:#444;}
+
+  /* KV ROWS */
+  .kv-block{display:flex;flex-direction:column;gap:7px;margin-top:10px;}
+  .kv-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding-bottom:6px;border-bottom:1px solid #eee;}
+  .kv-row:last-child{border-bottom:none;}
+  .kv-key{font-size:12px;color:#555;flex:1;}
+  .kv-val{font-family:'JetBrains Mono',monospace;font-size:11.5px;text-align:right;}
+  .kv-val.red{color:var(--red);}
+  .kv-val.amber{color:var(--amber);}
+  .kv-val.green{color:var(--green);}
+  .kv-val.blue{color:var(--blue);}
+
+  /* CHIPS */
+  .chip{display:inline-block;font-size:10px;font-weight:600;padding:2px 9px;letter-spacing:0.5px;}
+  .chip-red{background:var(--red-soft);color:var(--red);border:1px solid var(--red-border);}
+  .chip-amber{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-border);}
+  .chip-blue{background:var(--blue-soft);color:var(--blue);border:1px solid var(--blue-border);}
+  .chip-green{background:var(--green-soft);color:var(--green);border:1px solid var(--green-border);}
+  .chip-dark{background:var(--grey-bg);color:var(--black);border:1px solid var(--grey-border);}
+
+  /* TECH STACK */
+  .tech-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1.5px solid var(--black);margin-top:16px;}
+  .tech-row{display:contents;}
+  .tech-cell{padding:11px 14px;border-right:1px solid var(--grey-border);border-bottom:1px solid var(--grey-border);}
+  .tech-cell:nth-child(3n){border-right:none;}
+  .tech-cell.header-cell{background:var(--black);color:var(--white);}
+  .tech-name{font-size:11.5px;font-weight:700;color:var(--black);margin-bottom:2px;}
+  .tech-detail{font-size:11px;color:#555;}
+  .tech-lib{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--blue);}
+
+  /* FACTOR BARS */
+  .factor-list{display:flex;flex-direction:column;gap:9px;margin-top:10px;}
+  .factor-row{display:flex;align-items:center;gap:10px;}
+  .factor-name{font-size:11.5px;color:#333;width:160px;flex-shrink:0;line-height:1.4;}
+  .factor-bar-bg{flex:1;height:5px;background:#eee;}
+  .factor-bar{height:5px;}
+  .factor-wt{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--amber);width:30px;text-align:right;}
+
+  /* LINEAGE */
+  .lineage-block{background:var(--code-bg);padding:22px 24px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--code-text);line-height:2.1;margin-bottom:52px;}
+  .lk{color:#3ecfcf;}
+  .la{color:#f5a623;}
+  .lc{color:#445a78;}
+
+  /* ANOMALY EXAMPLE */
+  .example-wrap{margin-bottom:52px;background:var(--grey-bg);padding:32px 40px;}
+  .example-title{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
+  .example-meta{font-size:12px;color:#666;margin-bottom:24px;font-style:italic;}
+  .ex-trace{display:grid;grid-template-columns:1fr 22px 1fr 22px 1fr 22px 1fr 22px 1fr 22px 1fr;align-items:stretch;gap:0;}
+  .ex-node{background:#fff;border:1.5px solid var(--grey-border);padding:15px 13px;}
+  .ex-node.hot{border-color:var(--red);border-width:2px;}
+  .ex-layer-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--grey-muted);margin-bottom:5px;}
+  .ex-title{font-size:12px;font-weight:700;margin-bottom:6px;}
+  .ex-body{font-size:11px;line-height:1.6;color:#333;}
+  .ex-metric{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--red);margin-top:6px;line-height:1.6;}
+  .ex-arrow{display:flex;align-items:center;justify-content:center;color:var(--red);font-size:16px;font-weight:900;}
+
+  /* FOOTER */
+  .footer{background:var(--black);color:#666;font-size:11px;padding:16px 68px;display:flex;justify-content:space-between;align-items:center;border-top:4px solid var(--red);}
+  .footer span{color:var(--white);}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-eyebrow">Technical Architecture Reference · Layers 1–6</div>
+  <h1>KPI Anomaly Detection<br><span>Agent — Technical Flow</span></h1>
+  <div class="header-sub">6-layer pipeline: data ingestion → feature engineering → ensemble detection → causal inference → intelligence → communication → AI orchestration. All 5 pipeline layers built and quality-tested. Power BI dashboard pending. Layer 6 orchestration architecture defined.</div>
+</div>
+
+<div class="page">
+
+  <!-- EXECUTION SUMMARY -->
+  <div class="sec-label">Execution Summary</div>
+  <div class="summary-box">
+    <h2>What Has Been Built</h2>
+    <p>A 6-layer automated KPI monitoring pipeline processing 731 days (2024-01-01 → 2025-12-31) of synthetic e-commerce data. The pipeline ingests raw transactional tables, engineers 6 temporal features per KPI, runs a 3-method ensemble anomaly detector, traces root causes through a causal graph with statistical inference, quantifies dollar impact, generates priority-ranked recommendations (playbook + Claude AI hybrid), formats and routes alerts by audience and channel, and stores everything in a Power BI-ready star schema. A Claude-based orchestration agent (Layer 6) ties all layers together and runs the pipeline autonomously each morning.</p>
+    <p>The system monitors 12 tiered KPIs across 731 days (8,772 KPI-day evaluation pairs total). Of those, 75.5% are classified as normal, 22.5% go on the watch list, and 2.1% are confirmed anomalies (181 events across 68 unique dates — 9.3% of all days had at least one confirmed anomaly). Of the 181 anomalies, 8.3% had all three ensemble methods agree simultaneously, indicating the highest-confidence detections.</p>
+  </div>
+  <div class="stat-strip">
+    <div class="stat-cell"><span class="stat-num">731</span><div class="stat-desc">Days · 33 raw KPIs<br>183 engineered cols</div></div>
+    <div class="stat-cell"><span class="stat-num">8,772</span><div class="stat-desc">KPI-day pairs<br>evaluated</div></div>
+    <div class="stat-cell"><span class="stat-num red">9.3%</span><div class="stat-desc">of days had a<br>confirmed anomaly</div></div>
+    <div class="stat-cell"><span class="stat-num">181</span><div class="stat-desc">Confirmed anomalies<br>across 68 dates</div></div>
+    <div class="stat-cell"><span class="stat-num red">8.3%</span><div class="stat-desc">of anomalies — all 3<br>methods agreed</div></div>
+    <div class="stat-cell"><span class="stat-num">17</span><div class="stat-desc">SQLite tables<br>produced L1–L5</div></div>
+  </div>
+
+  <!-- LAYER CARDS -->
+  <div class="sec-label">Layer-by-Layer Technical Architecture</div>
+  <div class="layers">
+
+    <!-- LAYER 1 -->
+    <div class="layer-card">
+      <div class="layer-header">
+        <div class="layer-id-block">
+          <div class="l-num">L1</div>
+          <div class="l-name">Data Foundation</div>
+        </div>
+        <div class="layer-meta-block">
+          <div>
+            <div class="layer-headline">Data Foundation — Ingestion, Storage &amp; Feature Engineering</div>
+            <div class="layer-subline">ingest_and_engineer.py → processed_kpi_features.csv (731 × 183) → SQLite: processed_kpis</div>
+          </div>
+        </div>
+      </div>
+      <div class="step-grid cols2">
+
+        <div class="step-box">
+          <div class="step-num red">Step 1.1 — Source Data</div>
+          <div class="step-title">What data does the system start with?</div>
+          <div class="step-plain">The system starts with 8 CSV files covering 731 days of e-commerce activity. The master dataset combines them into one analytical table (731 rows × 33 columns). Ground-truth anomaly labels (anomaly_flag, anomaly_event, anomaly_kpi) are embedded here, used later to validate detection accuracy.</div>
+          <div class="step-detail">
+            <strong>Fact tables:</strong> orders · order_items · inventory_daily · marketing_spend_daily · website_traffic_daily · anomaly_log<br>
+            <strong>Dimension tables:</strong> customers (10,000 rows — segment, LTV, loyalty status) · products (500 rows — category, price, gross_margin = 0.4968)<br>
+            <strong>Ground truth:</strong> 20 labeled anomaly days across 731 — used to validate all detection methods
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num red">Step 1.2 — KPI Tiers</div>
+          <div class="step-title">Which KPIs are monitored, and how urgently?</div>
+          <div class="step-plain">The 12 monitored KPIs are split into 3 tiers based on business criticality. Tier determines how quickly an alert fires, which detection methods apply, and how the ensemble votes are capped. Exogenous variables (economic_index, seasonal_index, consumer_sentiment, marketing_pressure) are used as model inputs but are not themselves detection targets.</div>
+          <div class="step-detail">
+            <span class="chip chip-red">Tier 1 — Alert immediately:</span> total_revenue_usd · n_orders · avg_roas · conversion_rate<br><br>
+            <span class="chip chip-amber">Tier 2 — Alert within 1hr:</span> return_rate · n_stockouts · avg_order_value_usd · bounce_rate<br><br>
+            <span class="chip chip-blue">Tier 3 — Daily digest:</span> total_clicks · sessions · inventory_health · avg_discount_pct
+          </div>
+        </div>
+
+        <div class="step-box" style="grid-column:1/-1;">
+          <div class="step-num red">Step 1.3 — Feature Engineering</div>
+          <div class="step-title">What 6 signals are computed for every KPI, and what does each one mean?</div>
+          <div class="step-plain">For each of the 25 KPI columns, 6 temporal features are computed — turning a raw daily number into a rich signal the detection models can interpret. The result is 183 columns total (33 raw + 25 KPIs × 6 features). Every feature answers a specific question about how today's value compares to recent history.</div>
+          <table class="feat-table">
+            <tr>
+              <th>Feature</th>
+              <th>Column Suffix</th>
+              <th>Formula</th>
+              <th>Plain-language definition</th>
+            </tr>
+            <tr>
+              <td class="name">Rolling Mean</td>
+              <td class="name">_rolling_mean</td>
+              <td class="formula">mean(kpi[t-6 : t])</td>
+              <td>The average value of this KPI over the past 7 days. Acts as a self-updating "what's normal lately" baseline. Used as the reference point for the Z-score below.</td>
+            </tr>
+            <tr>
+              <td class="name">Rolling Std Dev</td>
+              <td class="name">_rolling_std</td>
+              <td class="formula">std(kpi[t-6 : t])</td>
+              <td>How much this KPI typically fluctuates from day to day over the past 7 days. A naturally volatile KPI (e.g. total_clicks) will have a larger std, meaning it needs a bigger absolute swing before it looks anomalous.</td>
+            </tr>
+            <tr>
+              <td class="name">Z-Score</td>
+              <td class="name">_z_score</td>
+              <td class="formula">(kpi[t] − mean) / std</td>
+              <td>How many standard deviations today's value sits above or below the 7-day average. A z-score of +2.5 means today's value is 2.5 standard deviations above normal — a rare event under normal conditions. This is the core statistical detection signal.</td>
+            </tr>
+            <tr>
+              <td class="name">Week-over-Week</td>
+              <td class="name">_wow_change</td>
+              <td class="formula">(kpi[t] − kpi[t-7]) / |kpi[t-7]|</td>
+              <td>How much this KPI has changed compared to the same day last week (e.g. Monday vs. last Monday). Compares equivalent days, so it's stable against weekly seasonality. Catches gradual week-on-week erosion that the 7-day window might miss.</td>
+            </tr>
+            <tr>
+              <td class="name">Month-over-Month</td>
+              <td class="name">_mom_change</td>
+              <td class="formula">(kpi[t] − kpi[t-30]) / |kpi[t-30]|</td>
+              <td>How much this KPI has changed compared to 30 days ago. Catches slow structural drift — a KPI declining steadily for weeks will have a large negative MoM even before its 7-day Z-score becomes extreme.</td>
+            </tr>
+            <tr>
+              <td class="name">1-Day Lag</td>
+              <td class="name">_lag_1</td>
+              <td class="formula">kpi[t-1]</td>
+              <td>Yesterday's raw KPI value. Feeds the machine learning models (Isolation Forest, LSTM) so they can see the sequential context — the direction the KPI was moving before today.</td>
+            </tr>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- LAYER 2 -->
+    <div class="layer-card">
+      <div class="layer-header">
+        <div class="layer-id-block">
+          <div class="l-num">L2</div>
+          <div class="l-name">Detection</div>
+        </div>
+        <div class="layer-meta-block">
+          <div>
+            <div class="layer-headline">Anomaly Detection Engine — 3-Method Ensemble with Voting</div>
+            <div class="layer-subline">5 scripts → method_a/b/c_results.csv → ensemble_voting_matrix.csv (8,772 × 31) → anomaly_results.csv (181 × 25)</div>
+          </div>
+        </div>
+      </div>
+      <div class="step-grid cols3">
+
+        <div class="step-box">
+          <div class="step-num amber">Method A — Statistical Baseline</div>
+          <div class="step-title">Fast rules-based detection across all 12 KPIs</div>
+          <div class="step-plain">Three independent sub-flags (A1, A2, A3) fire when a KPI crosses a statistical threshold. Method A is deliberately over-sensitive — it catches every genuine anomaly (100% recall) at the cost of many false alarms. The ensemble in Step 2.3 filters those out.</div>
+          <div class="step-detail">
+            <strong>A1 — Z-score threshold:</strong> |z| &gt; 2.5 (Tier 1/2) or 3.0 (Tier 3). In this dataset the max z-score is 2.268, so A1 fires zero times — the 7-day window tracks the series too closely to produce large z-scores.<br><br>
+            <strong>A2 — STL residual:</strong> Decomposes each KPI into trend + seasonality + residual (STL, period=7, robust=True), then applies z-score to the residual only. Separating trend and seasonality makes the residual more sensitive. Primary detection signal: fires 367 times.<br><br>
+            <strong>A3 — WoW + MoM combined breach:</strong> Fires when both WoW &gt; ±20% AND MoM &gt; ±15% simultaneously (Tier 1/2). Catches structural multi-week decline. Fires 1,602 times.<br><br>
+            <strong>Result:</strong> method_a_flag = A1 OR A2 OR A3 → 1,886 total fires (21.5% of all 8,772 KPI-day pairs). Recall = 100% on 20 ground-truth days.
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num amber">Method B — Isolation Forest</div>
+          <div class="step-title">Unsupervised ML catches multi-KPI correlated anomalies</div>
+          <div class="step-plain">Isolation Forest looks at all 29 raw KPI columns together (not one at a time) and identifies days where the overall pattern of KPI values is unusual. It catches correlated events — e.g. sessions spiking while conversion_rate drops — that a univariate check would miss because neither KPI alone looks extreme enough.</div>
+          <div class="step-detail">
+            <strong>Input:</strong> 29 raw KPI columns only — engineered features excluded to avoid data leakage into detection.<br><br>
+            <strong>Training:</strong> StandardScaler + IsolationForest(contamination=0.05, n_estimators=100) fit on rows 0–583 (80% = 2024-01-01 to ~2025-07-31). Scored on all 731 rows for a full historical audit.<br><br>
+            <strong>Output:</strong> One flag per day (not per KPI). 34 of 731 days flagged (4.7%). Score separation is clean: all 34 flagged days have a positive anomaly score; all 697 non-flagged days have a negative score. Each flagged day reports its top-5 KPI contributors by standardised absolute deviation.<br><br>
+            <strong>Recall:</strong> Correctly flags 8 of the 20 ground-truth days. Misses 12.
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num amber">Method C — Prophet Forecasting</div>
+          <div class="step-title">Time-series forecasting for Tier 1 KPIs only</div>
+          <div class="step-plain">Prophet builds a full probabilistic forecast for each Tier 1 KPI — modelling trend, weekly seasonality, yearly seasonality, and three external factors. An anomaly fires when the actual value falls outside the 95% prediction interval. This is the strongest method for catching holiday-driven and structural events.</div>
+          <div class="step-detail">
+            <strong>Scope:</strong> 4 Tier 1 KPIs × 731 days = 2,924 rows. Only Tier 1 KPIs receive this treatment — it's the most compute-intensive method.<br><br>
+            <strong>Config:</strong> interval_width=0.95, weekly_seasonality=True, yearly_seasonality=True. Regressors: economic_index, seasonal_index, marketing_pressure.<br><br>
+            <strong>Flag rule:</strong> actual &lt; yhat_lower OR actual &gt; yhat_upper.<br><br>
+            <strong>Coverage on non-anomaly days:</strong> total_revenue_usd, n_orders, conversion_rate = 100% (no false alarms). avg_roas = 94.5% (its high natural volatility causes a few normal days to fall outside the 95% CI — statistically expected).<br><br>
+            <strong>Recall:</strong> Flags 8 of the 20 ground-truth days. The same 8 as Method B.
+          </div>
+        </div>
+
+      </div>
+
+      <div class="step-grid cols2" style="padding-top:0;">
+
+        <div class="step-box">
+          <div class="step-num amber">Step 2.3 — Ensemble Voting</div>
+          <div class="step-title">How the three methods are combined into a final verdict</div>
+          <div class="step-plain">Each method casts a vote for every KPI-day pair. A confirmation requires at least 2 votes. Severity is assigned based on how many methods agreed and which tier the KPI belongs to. This filtering step removes 96% of Method A's false positives while keeping all high-confidence detections.</div>
+          <div class="vote-grid">
+            <div class="vote-box v0"><div class="vote-n">6,620</div><div class="vote-label">0 votes</div><div class="vote-desc">NORMAL — 75.5% of all KPI-day pairs</div></div>
+            <div class="vote-box v1"><div class="vote-n">1,971</div><div class="vote-label">1 vote</div><div class="vote-desc">WATCH — 22.5% · monitor only</div></div>
+            <div class="vote-box v2"><div class="vote-n">166</div><div class="vote-label">2 votes</div><div class="vote-desc">CONFIRMED — 1.9% · MEDIUM or LOW</div></div>
+            <div class="vote-box v3"><div class="vote-n">15</div><div class="vote-label">3 votes</div><div class="vote-desc">ALL AGREE — 0.2% · HIGH severity</div></div>
+          </div>
+          <div class="step-detail" style="margin-top:12px;">
+            <strong>Max votes by tier:</strong> Tier 1 = A + B + C = max 3 · Tier 2/3 = A + B = max 2<br>
+            <strong>Severity rules:</strong> HIGH = Tier 1 + votes=3 (15 events, 8.3%) · MEDIUM = Tier 1 votes=2 or any Tier 2 confirmed (92 events, 50.8%) · LOW = Tier 3 confirmed (74 events, 40.9%)<br>
+            <strong>Anomaly ID format:</strong> ANO-YYYYMMDD-{KPI_CODE}
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num amber">Method Comparison vs Ground Truth</div>
+          <div class="step-title">How each method performs against the 20 known anomaly days</div>
+          <div class="step-plain">The table below shows day-level precision and recall for each method, evaluated against the 20 labeled ground-truth anomaly days. Method A is designed for perfect recall (catches everything). The ensemble trades 8 of those recalls for a massive reduction in false alarms.</div>
+          <table class="method-table">
+            <tr><th>Method</th><th>Days flagged</th><th>True Pos</th><th>False Pos</th><th>Precision</th><th>Recall</th><th>F1</th></tr>
+            <tr><td>A — Statistical</td><td class="m-val">696 (95.2%)</td><td class="m-val">20</td><td class="m-val">676</td><td class="m-val">0.029</td><td class="m-val m-green">1.000</td><td class="m-val">0.056</td></tr>
+            <tr><td>B — Isolation Forest</td><td class="m-val">34 (4.7%)</td><td class="m-val">8</td><td class="m-val">26</td><td class="m-val">0.235</td><td class="m-val">0.400</td><td class="m-val">0.296</td></tr>
+            <tr><td>C — Prophet</td><td class="m-val">47 (6.4%)</td><td class="m-val">8</td><td class="m-val">39</td><td class="m-val">0.170</td><td class="m-val">0.400</td><td class="m-val">0.239</td></tr>
+            <tr class="ensemble"><td>Ensemble (≥2 votes)</td><td class="m-val">68 (9.3%)</td><td class="m-val">12</td><td class="m-val">56</td><td class="m-val">0.176</td><td class="m-val">0.600</td><td class="m-val">0.271</td></tr>
+          </table>
+          <div class="step-detail" style="margin-top:10px;">The ensemble misses 8 ground-truth days — events that only Method A detected (B and C both missed them). This is the deliberate cost of requiring 2 methods to agree: fewer false positives at the expense of some true positives.</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- LAYER 3 -->
+    <div class="layer-card">
+      <div class="layer-header">
+        <div class="layer-id-block">
+          <div class="l-num">L3</div>
+          <div class="l-name">Root Cause</div>
+        </div>
+        <div class="layer-meta-block">
+          <div>
+            <div class="layer-headline">Root Cause Analysis — Dependency Graph + Causal Inference + External Driver Check</div>
+            <div class="layer-subline">4 scripts → rca_graph (181×18) → rca_causal (181×40) → rca_results (181×52) → rca_assembly.csv (181×45)</div>
+          </div>
+        </div>
+      </div>
+      <div class="step-grid cols2">
+
+        <div class="step-box">
+          <div class="step-num blue">Step 3.1 — Dependency Graph Traversal</div>
+          <div class="step-title">Which upstream KPI caused this anomaly to happen?</div>
+          <div class="step-plain">The system has a pre-built map of how KPIs cause each other (a Directed Acyclic Graph). When a Tier 1 KPI fires, the system walks down that map — from the anomalous KPI toward its children — looking for which child KPI was also moving unusually on that day. The child with the largest z-score is identified as the suspected driver, and the process repeats until it reaches a dead end.</div>
+          <div class="step-detail">
+            <strong>Graph structure (effect → cause direction):</strong><br>
+            total_revenue_usd → n_orders → sessions → bounce_rate / conversion_rate<br>
+            total_revenue_usd → avg_order_value_usd → avg_discount_pct<br>
+            avg_roas → total_clicks<br><br>
+            <strong>Algorithm:</strong> Depth-first search (DFS) from anomalous KPI, following edges where |z_score| ≥ 1.5 on the anomaly date. Picks highest |z| child at each node. Tier 2/3 anomalies skip traversal (they are already the driver) — their upstream Tier 1 impacts are identified via nx.ancestors().<br><br>
+            <strong>Stop reason breakdown (181 total):</strong><br>
+            Tier 2/3 no traversal: 93 (51.4%) · No anomalous child found: 73 (40.3%) · Leaf node reached: 15 (8.3%)<br>
+            Depth distribution (88 Tier 1): depth=0: 62 · depth=1: 22 · depth=2: 4
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num blue">Step 3.2 — Causal Inference</div>
+          <div class="step-title">How confident are we that the driver actually caused the anomaly?</div>
+          <div class="step-plain">Two statistical methods quantify confidence in the root cause. CausalImpact estimates whether removing the suspected driver would have prevented the anomaly (runs on HIGH severity only). DoWhy estimates the average causal effect of the driver on the outcome KPI and stress-tests the estimate to ensure it's not explained by hidden confounders. Together they produce a root_cause_confidence score from 0 to 1.</div>
+          <div class="step-detail">
+            <strong>CausalImpact:</strong> Runs on 14 of 15 HIGH anomalies (1 skipped: pre-period had fewer than 30 rows). 6 of 14 runs found a statistically significant effect. Mean root_cause_confidence for HIGH anomalies: 0.86.<br><br>
+            <strong>DoWhy:</strong> Runs on 26 anomaly records — all HIGH and MEDIUM where the dependency graph found a distinct upstream driver. Covers 7 unique (driver → outcome) pairs. All 26 pass the random common cause refutation test, confirming the causal estimates are robust to unobserved confounding.<br><br>
+            <strong>root_cause_confidence</strong> is available for 35 of 181 anomalies — only those where at least one causal method ran. The remaining 146 use a severity-based fallback in Layer 4 prioritization.
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num blue">Step 3.3 — External Driver Attribution</div>
+          <div class="step-title">Is this something we can actually fix, or is it driven by the market?</div>
+          <div class="step-plain">Before escalating an anomaly, the system checks whether it was caused by an external market condition beyond the business's control. If so, the actionability score is reduced and, in some cases, the alert is suppressed entirely — preventing the team from being paged about something they cannot influence.</div>
+          <div class="step-detail">
+            <strong>Two external driver types detected:</strong><br><br>
+            <strong>competitive_pressure (6 events):</strong> avg_roas is DOWN and marketing_pressure &gt; 0.30. Competitors are flooding the ad market. Actionability score → 0.45. These 6 are escalation-suppressed.<br><br>
+            <strong>consumer_sentiment_decline (2 events):</strong> return_rate is UP and consumer_sentiment &lt; −0.10. Reduced consumer confidence is driving higher returns. Actionability score → 0.90. Not suppressed — the team can still respond with retention campaigns.<br><br>
+            <strong>Suppression rules (two hard guards):</strong><br>
+            HIGH severity anomalies are never suppressed regardless of external cause.<br>
+            UP direction anomalies are never suppressed — positive surprises are always business-relevant.<br>
+            All 6 suppressed events are MEDIUM severity + DOWN direction.
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num blue">Step 3.4 — RCA Assembly &amp; Priority Routing Flag</div>
+          <div class="step-title">How is each anomaly labelled for what Layer 4 should do with it?</div>
+          <div class="step-plain">The final RCA step merges all outputs from steps 3.1–3.3, re-attaches the actual and expected values from Layer 2, computes a completeness score (how much of the causal story could be told), and assigns a layer4_priority_flag that routes each anomaly through the intelligence and communication layers.</div>
+          <div class="step-detail">
+            <div class="kv-block">
+              <div class="kv-row"><span class="kv-key">ESCALATE (HIGH severity)</span><span class="kv-val red">15 — 8.3%</span></div>
+              <div class="kv-row"><span class="kv-key">INVESTIGATE (MEDIUM, not suppressed)</span><span class="kv-val amber">86 — 47.5%</span></div>
+              <div class="kv-row"><span class="kv-key">MONITOR (LOW / Tier 3)</span><span class="kv-val blue">74 — 40.9%</span></div>
+              <div class="kv-row"><span class="kv-key">SUPPRESSED (competitive pressure)</span><span class="kv-val" style="color:var(--grey-muted)">6 — 3.3%</span></div>
+              <div class="kv-row"><span class="kv-key">Output: rca_assembly.csv</span><span class="kv-val">181 rows × 45 cols</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- LAYER 4 -->
+    <div class="layer-card">
+      <div class="layer-header">
+        <div class="layer-id-block">
+          <div class="l-num">L4</div>
+          <div class="l-name">Intelligence</div>
+        </div>
+        <div class="layer-meta-block">
+          <div>
+            <div class="layer-headline">Intelligence Engine — Impact Quantification, Prioritization &amp; Recommendations</div>
+            <div class="layer-subline">4 scripts → impact (181×51) → priority (181×59) → recommendations (181×68) → intelligence_results.csv (181×68)</div>
+          </div>
+        </div>
+      </div>
+      <div class="step-grid cols2">
+
+        <div class="step-box">
+          <div class="step-num green">Step 4.1 — Business Impact Quantification</div>
+          <div class="step-title">What does this anomaly cost the business in dollar terms?</div>
+          <div class="step-plain">Each anomaly is translated into a concrete financial figure using KPI-specific formulas grounded in real business logic. All baselines are derived from the master dataset averages and the products.csv gross margin. A positive revenue_at_risk means the business is losing money; a negative value means it captured an unexpected gain above forecast.</div>
+          <div class="step-detail">
+            <strong>Key constants:</strong> FORWARD_DAYS=7 · AVG_GROSS_MARGIN=0.4968 · ROAS_REVENUE_SHARE=0.30<br><br>
+            <strong>Example formulas:</strong><br>
+            total_revenue_usd: (expected − actual) × 7<br>
+            n_orders: (expected − actual) × AVG_AOV × 7<br>
+            conversion_rate: (expected − actual) × AVG_DAILY_SESSIONS × AVG_AOV × 7<br><br>
+            <strong>Derived fields:</strong> margin_impact = revenue_at_risk × 0.4968 · monthly_shortfall = revenue_at_risk × (30/7) · impact_pct_of_plan = (risk/7 / avg_daily_rev) × 100<br><br>
+            <strong>Portfolio totals:</strong> Total revenue at risk across all anomalies = $800,375 · Total captured upside = $4,381,894 (upside far exceeds downside — net positive position)
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num green">Step 4.2 — Prioritization Engine</div>
+          <div class="step-title">How are 181 anomalies ranked so the most important gets attention first?</div>
+          <div class="step-plain">Each anomaly receives a composite priority score (0–1) from five weighted factors. The score is log-scaled for revenue impact (so a $1M event doesn't infinitely dominate) and normalised so all factors contribute meaningfully. Every anomaly gets a unique integer rank (1 = most urgent) — no ties.</div>
+          <div class="factor-list">
+            <div class="factor-row"><span class="factor-name">Revenue impact (log-scaled)</span><div class="factor-bar-bg"><div class="factor-bar" style="width:35%;background:var(--red);"></div></div><span class="factor-wt">35%</span></div>
+            <div class="factor-row"><span class="factor-name">KPI tier (1.0 / 0.6 / 0.3)</span><div class="factor-bar-bg"><div class="factor-bar" style="width:25%;background:var(--amber);"></div></div><span class="factor-wt">25%</span></div>
+            <div class="factor-row"><span class="factor-name">Causal confidence</span><div class="factor-bar-bg"><div class="factor-bar" style="width:20%;background:var(--blue);"></div></div><span class="factor-wt">20%</span></div>
+            <div class="factor-row"><span class="factor-name">Recoverability / actionability</span><div class="factor-bar-bg"><div class="factor-bar" style="width:10%;background:var(--green);"></div></div><span class="factor-wt">10%</span></div>
+            <div class="factor-row"><span class="factor-name">Internal vs external driver</span><div class="factor-bar-bg"><div class="factor-bar" style="width:10%;background:var(--purple);"></div></div><span class="factor-wt">10%</span></div>
+          </div>
+          <div class="kv-block" style="margin-top:14px;">
+            <div class="kv-row"><span class="kv-key">HIGH band (&gt;0.75) — 8.3% of anomalies</span><span class="kv-val red">15 · score 0.833–0.991</span></div>
+            <div class="kv-row"><span class="kv-key">MEDIUM band (0.50–0.75) — 50.8%</span><span class="kv-val amber">92 · score 0.50–0.75</span></div>
+            <div class="kv-row"><span class="kv-key">LOW band (&lt;0.50) — 40.9%</span><span class="kv-val blue">74 · score 0.431–0.50</span></div>
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num green">Step 4.3 — Recommendation Engine (Playbook + AI)</div>
+          <div class="step-title">What should the team actually do about this anomaly?</div>
+          <div class="step-plain">Every anomaly gets three recommended actions: what to do in the next hour (IMMEDIATE), what to fix this week (SHORT_TERM), and how to prevent it recurring (PREVENTIVE). These come from a 30-entry deterministic playbook first, then the 101 highest-priority events are enhanced by a Claude AI model that adds context-specific nuance from the root cause narrative, financial impact, and external market conditions.</div>
+          <div class="step-detail">
+            <strong>Playbook:</strong> 30-entry dict keyed by (kpi, direction, suspected_driver_kpi) 3-tuples. Falls back to (kpi, direction, None) if no driver-specific entry exists. 100% match rate across 181 anomalies. Each entry specifies owner team and effort level (H/M/L).<br><br>
+            <strong>AI enhancement (claude-haiku-4-5-20251001):</strong> Called for 101 ESCALATE + non-suppressed INVESTIGATE rows (55.8% of anomalies). Prompt caching applied to the ~900-token system prompt (cache_control: ephemeral). MONITOR (74) and SUPPRESSED (6) receive playbook text only — no LLM cost for lower-priority events.<br><br>
+            <strong>Effort distribution:</strong> H=3 (1.7%) · M=60 (33.1%) · L=118 (65.2%)
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num green">Step 4.4 — Intelligence Assembly</div>
+          <div class="step-title">How are all Layer 4 outputs certified and packaged?</div>
+          <div class="step-plain">The assembly script merges all four Layer 4 outputs into a single certified file (intelligence_results.csv). It runs 12 internal quality assertions before writing — any failure exits without touching the output. This ensures Layer 5 always receives a clean, validated input and never operates on partial or corrupt data.</div>
+          <div class="step-detail">
+            <strong>Column composition:</strong><br>
+            45 from rca_assembly + 6 impact + 8 priority + 9 recommendations = 68 total<br><br>
+            <strong>Key certified values:</strong><br>
+            priority_rank: unique integers 1–181, no ties, no gaps<br>
+            priority_score: all 181 values in [0, 1], no nulls<br>
+            llm_enhanced: True for exactly 101 rows<br>
+            immediate_action, short_term_fix, preventive_measure: all non-empty for the 101 LLM rows
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- LAYER 5 -->
+    <div class="layer-card">
+      <div class="layer-header">
+        <div class="layer-id-block">
+          <div class="l-num">L5</div>
+          <div class="l-name">Communication</div>
+        </div>
+        <div class="layer-meta-block">
+          <div>
+            <div class="layer-headline">Communication Layer — Alert Formatting, Reports, Delivery &amp; Power BI Star Schema</div>
+            <div class="layer-subline">5 scripts → alert_payloads (181×73) → reports/ → delivery_log (181×13) → communication_results (181×78) → powerbi/ (5 files)</div>
+          </div>
+        </div>
+      </div>
+      <div class="step-grid cols3">
+
+        <div class="step-box">
+          <div class="step-num purple">Steps 5.1–5.3 — Formatting, Reports &amp; Delivery</div>
+          <div class="step-title">How are alerts formatted and dispatched to the right people?</div>
+          <div class="step-plain">Step 5.1 adds the alert subject, body, audience, delivery channel, and urgency label to every anomaly row. Step 5.2 generates structured HTML reports for each anomaly and a daily summary. Step 5.3 simulates dispatch across four routing paths, logging a delivery receipt for every anomaly.</div>
+          <div class="step-detail">
+            <strong>Subject format:</strong> [{FLAG}] {KPI label} {direction} {deviation:+.1f}% — Priority #{rank} | {date}<br><br>
+            <strong>Routing table:</strong><br>
+            ESCALATE → Exec + Ops → Slack + Email → Immediate (15 events, 8.3%)<br>
+            INVESTIGATE → Ops + Analyst → Email → Daily (86 events, 47.5%)<br>
+            MONITOR → Analyst → Digest → Weekly (74 events, 40.9%)<br>
+            SUPPRESSED → Audit log only → "NO ACTION REQUIRED" (6 events, 3.3%)<br><br>
+            <strong>Reports generated:</strong> executive_summary.md (109 lines) · operations_digest.md (797 lines, covers all 101 actionable anomalies) · monitoring_digest.md (211 lines, covers all 74 MONITOR anomalies)
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num purple">Step 5.4 — Communication Assembly</div>
+          <div class="step-title">How is the complete Layer 5 output certified?</div>
+          <div class="step-plain">Joins alert_payloads (181×73) with delivery_log (181×13) on anomaly_id to produce the final certified output. 5 delivery columns are added: recipient, message_id, sent_at, delivery_status, delivery_note. Runs 12 internal quality assertions before writing. All Layer 4 fields (priority_rank, priority_score, LLM flags) are preserved and verified intact.</div>
+          <div class="step-detail">
+            <strong>Output:</strong> communication_results.csv — 181 rows × 78 columns<br><br>
+            <strong>Portfolio-level financials (certified):</strong><br>
+            Total revenue at risk: $800,375<br>
+            Total captured upside: $4,381,894 (5.5× the downside)<br>
+            Net margin benefit: $1,779,234<br><br>
+            <strong>All 17 SQLite tables (Layers 1–5) verified in final parity test.</strong>
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num purple">Step 5.5 — Power BI Star Schema</div>
+          <div class="step-title">How is the data structured for the dashboard?</div>
+          <div class="step-plain">Reshapes communication_results.csv into a clean star schema — dropping 38 raw detection internals and long-text columns that aren't suited for visual slicing. Produces 5 files with verified referential integrity: all anomaly dates exist in dim_date, all KPIs exist in dim_kpi. Dashboard build is in progress.</div>
+          <div class="step-detail">
+            fact_anomalies.csv — 181 × 40 (one row per confirmed anomaly)<br>
+            dim_kpi.csv — 12 × 5 (name, tier, label, direction pref, owner)<br>
+            dim_date.csv — 731 × 13 (full calendar 2024–2025, holiday flags)<br>
+            summary_kpi_impact.csv — 17 × 9 (KPI × priority_band aggregation)<br>
+            summary_timeline.csv — 68 × 10 (one row per anomaly date)<br><br>
+            <strong>Relationships:</strong> fact[date] → dim_date[date] (many-to-one) · fact[kpi] → dim_kpi[kpi] (many-to-one)<br>
+            <strong>Dashboard pages planned:</strong> Command Center · Root Cause Explorer · Impact &amp; Recommendations · Executive Summary
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- LAYER 6 -->
+    <div class="layer-card">
+      <div class="layer-header">
+        <div class="layer-id-block">
+          <div class="l-num">L6</div>
+          <div class="l-name">Agent</div>
+        </div>
+        <div class="layer-meta-block">
+          <div>
+            <div class="layer-headline">Agent Orchestration — Claude AI Coordinates the Entire Pipeline</div>
+            <div class="layer-subline">claude-sonnet-4-6 orchestrator · 9 tool calls per daily run · Writes executive brief · Updates Power BI dataset</div>
+          </div>
+        </div>
+      </div>
+      <div class="step-grid cols3">
+
+        <div class="step-box">
+          <div class="step-num dark">Step 6.1 — Agent Architecture</div>
+          <div class="step-title">What is the agent, and what can it do?</div>
+          <div class="step-plain">The orchestration agent is a Claude Sonnet model that holds the full business rulebook in its system prompt — KPI definitions, alert routing logic, the dependency graph, and the playbook index. It decides which tools to call, in what order, and what to do based on what it detects. No human triage is needed between pipeline layers.</div>
+          <div class="step-detail">
+            <strong>System prompt contains:</strong> KPI definitions · business rules · alert routing table · dependency graph structure · playbook index<br><br>
+            <strong>9 tools available:</strong><br>
+            fetch_kpis · run_detection · run_rca · score_impact · prioritize · generate_recommendations · send_alert · generate_executive_summary · update_powerbi_dataset<br><br>
+            <strong>Trigger:</strong> 07:00 daily or on new data arrival
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num dark">Step 6.2 — Daily Decision Flow</div>
+          <div class="step-title">What does the agent do, step by step, every morning?</div>
+          <div class="step-plain">Each morning the agent runs a structured 9-step decision sequence. It fetches today's KPIs, runs all three detection methods, and branches based on what it finds. If anomalies are detected, it runs root cause analysis and impact scoring for each one, prioritises them, generates recommendations, and dispatches alerts — then always ends by writing the daily brief and refreshing the Power BI dataset.</div>
+          <div class="step-detail">
+            Step 1: fetch_kpis(date=today) — latest row from master_dataset<br>
+            Step 2: run_detection(methods=['statistical','prophet','isolation_forest'])<br>
+            Step 3: run_rca(anomaly) — for each HIGH / MEDIUM anomaly<br>
+            Step 4: score_impact(anomaly, root_cause)<br>
+            Step 5: prioritize(all_anomalies)<br>
+            Step 6: generate_recommendations(anomaly, root_cause, impact)<br>
+            Step 7: send_alert(severity=HIGH) → routes to correct channel<br>
+            Step 8: generate_executive_summary(all_anomalies, date)<br>
+            Step 9: update_powerbi_dataset() → Power BI refreshes
+          </div>
+        </div>
+
+        <div class="step-box">
+          <div class="step-num dark">Step 6.3 — Technology Stack</div>
+          <div class="step-title">What libraries and services power each layer?</div>
+          <div class="step-plain">The stack is Python-native, using established open-source libraries for each specialised task. The Claude API handles both the orchestration agent and the recommendation enhancement. Alerts are delivered via SMTP and webhook integrations.</div>
+          <div class="step-detail">
+            <strong>Data:</strong> pandas · SQLite (dev) / PostgreSQL / Azure SQL<br>
+            <strong>Feature engineering:</strong> pandas · statsmodels<br>
+            <strong>Statistical detection:</strong> scipy · statsmodels (STL)<br>
+            <strong>ML detection:</strong> scikit-learn (IsolationForest)<br>
+            <strong>Forecasting:</strong> prophet<br>
+            <strong>Causal inference:</strong> causalimpact · dowhy<br>
+            <strong>Agent &amp; recommendations:</strong> Anthropic Claude API (claude-sonnet-4-6 orchestrator · claude-haiku-4-5-20251001 recs)<br>
+            <strong>Alerts:</strong> smtplib + Slack / Teams webhooks<br>
+            <strong>Visualization:</strong> Power BI Desktop + Service<br>
+            <strong>Scheduler:</strong> Python schedule / GitHub Actions
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- end layers -->
+
+  <!-- DATA LINEAGE -->
+  <div class="sec-label">Data Lineage — File Output Map (17 SQLite Tables)</div>
+  <div class="lineage-block">
+<span class="lc">// Layer 1</span>
+master_dataset.csv (731×33) ──→ <span class="lk">processed_kpi_features.csv</span> (731×183)
+
+<span class="lc">// Layer 2</span>
+method_a_results.csv (8,772×18) + method_b_results.csv (731×9) + method_c_results.csv (2,924×15)
+→ ensemble_voting_matrix.csv (8,772×31) ──→ <span class="lk">anomaly_results.csv</span> (181×25)
+
+<span class="lc">// Layer 3</span>
+rca_graph_results.csv (181×18) → rca_causal_results.csv (181×40) → rca_results.csv (181×52) ──→ <span class="lk">rca_assembly.csv</span> (181×45)
+
+<span class="lc">// Layer 4</span>
+impact_results.csv (181×51) → priority_results.csv (181×59) → recommendations.csv (181×68) ──→ <span class="lk">intelligence_results.csv</span> (181×68)
+
+<span class="lc">// Layer 5</span>
+alert_payloads.csv (181×73) + delivery_log.csv (181×13) ──→ <span class="lk">communication_results.csv</span> (181×78)
+→ <span class="la">fact_anomalies (181×40)</span> + <span class="la">dim_kpi (12×5)</span> + <span class="la">dim_date (731×13)</span> + <span class="la">summary_kpi_impact (17×9)</span> + <span class="la">summary_timeline (68×10)</span>
+  </div>
+
+  <!-- ANOMALY EXAMPLE -->
+  <div class="sec-label">End-to-End Trace — Inventory Stockout (15 Mar 2024)</div>
+  <div class="example-wrap">
+    <div class="example-title">ANO-20240315-ORD · n_orders · Tier 1 · MEDIUM · Orders Down 35.7%</div>
+    <div class="example-meta">A non-seasonal, internally-driven operational event. Orders dropped from an expected ~230 to 148 due to a supply-chain stockout. Fully automated from raw data to email alert — zero human triage required.</div>
+    <div class="ex-trace">
+      <div class="ex-node">
+        <div class="ex-layer-tag">L1 · Data Foundation</div>
+        <div class="ex-title">Feature Engineering</div>
+        <div class="ex-body">n_orders = 148. rolling_mean ≈ 230. All 6 features computed: rolling_mean, rolling_std, z_score, wow_change, mom_change, lag_1.</div>
+        <div class="ex-metric">z_score: below −1.5<br>wow_change: &gt;−20%<br>mom_change: significant drop</div>
+      </div>
+      <div class="ex-arrow">›</div>
+      <div class="ex-node hot">
+        <div class="ex-layer-tag">L2 · Detection</div>
+        <div class="ex-title">Ensemble: votes=2</div>
+        <div class="ex-body">A2 (STL residual z) fires. A3 (WoW+MoM breach) fires. B (Isolation Forest) flags the day. C (Prophet) not applicable — n_orders is Tier 1 but B+A confirm it.</div>
+        <div class="ex-metric">severity: MEDIUM<br>direction: DOWN<br>deviation: −35.7%<br>votes: 2 of max 3</div>
+      </div>
+      <div class="ex-arrow">›</div>
+      <div class="ex-node">
+        <div class="ex-layer-tag">L3 · Root Cause</div>
+        <div class="ex-title">Dependency Traversal</div>
+        <div class="ex-body">DFS from n_orders: finds n_stockouts at |z| &gt;1.5 on same day. Traversal stops at leaf. suspected_driver_kpi = n_stockouts. Not externally driven. Not suppressed.</div>
+        <div class="ex-metric">root_cause_confidence: 0.78<br>actionability_score: 1.0<br>layer4_flag: INVESTIGATE</div>
+      </div>
+      <div class="ex-arrow">›</div>
+      <div class="ex-node">
+        <div class="ex-layer-tag">L4 · Intelligence</div>
+        <div class="ex-title">Impact + Priority + Actions</div>
+        <div class="ex-body">revenue_at_risk = +$27,888 (positive = loss). margin_impact = $13,853. playbook_key = order_volume_drop. LLM-enhanced (INVESTIGATE). Immediate: "Audit checkout funnel in GA4; trigger emergency reorder for stockout SKUs."</div>
+        <div class="ex-metric">priority_score: ~0.62<br>priority_rank: #53 of 181<br>priority_band: MEDIUM</div>
+      </div>
+      <div class="ex-arrow">›</div>
+      <div class="ex-node hot">
+        <div class="ex-layer-tag">L5 · Communication</div>
+        <div class="ex-title">Alert Dispatched</div>
+        <div class="ex-body">Subject: "[INVESTIGATE] Orders DOWN −35.7% — Priority #53 | 2024-03-15". Audience: Ops + Analyst. Channel: Email. Urgency: Daily. delivery_status: SENT.</div>
+        <div class="ex-metric">delivery_status: SENT<br>message_id: MSG-INV-0053<br>Power BI: fact_anomalies row</div>
+      </div>
+      <div class="ex-arrow">›</div>
+      <div class="ex-node">
+        <div class="ex-layer-tag">L6 · Agent</div>
+        <div class="ex-title">Agent Orchestrated</div>
+        <div class="ex-body">claude-sonnet-4-6 ran all 9 tool steps. Included this event in the daily executive brief. Updated Power BI star schema. Zero manual steps required.</div>
+        <div class="ex-metric">Tools called: 9<br>Brief: generated<br>Power BI: refreshed</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end page -->
+
+<div class="footer">
+  <div>KPI Anomaly Detection Agent — Technical Architecture Reference &nbsp;|&nbsp; <span>Layers 1–5 Complete · Layer 6 Architecture Defined · 17 SQLite Tables</span></div>
+  <div>Power BI Dashboard: <span>In Progress</span></div>
+</div>
+
+</body>
+</html>

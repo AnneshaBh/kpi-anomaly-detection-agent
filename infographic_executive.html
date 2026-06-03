@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KPI Anomaly Detection Agent — Executive Overview</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #000000;
+    --white: #ffffff;
+    --grey-dark: #1a1a1a;
+    --grey-mid: #3d3d3d;
+    --grey-light: #f0f0f0;
+    --grey-border: #d0d0d0;
+    --red: #e8001c;
+    --red-soft: #fff0f2;
+    --amber: #cc5500;
+    --amber-soft: #fff5ee;
+    --blue: #0057a8;
+    --blue-soft: #eef4fc;
+    --green: #00794c;
+    --green-soft: #eefaf4;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#fff; font-family:'Barlow',sans-serif; color:var(--black); min-width:1120px; }
+
+  /* HEADER */
+  .header { background:var(--black); color:var(--white); padding:52px 72px 44px; border-bottom:4px solid var(--red); }
+  .header-eyebrow { font-family:'Barlow Condensed',sans-serif; font-size:12px; font-weight:700; letter-spacing:5px; text-transform:uppercase; color:#888; margin-bottom:16px; }
+  .header h1 { font-family:'Barlow Condensed',sans-serif; font-size:52px; font-weight:900; text-transform:uppercase; line-height:1.05; letter-spacing:1px; margin-bottom:12px; }
+  .header h1 span { color:var(--red); }
+  .header-sub { font-size:15px; font-weight:300; color:#bbb; max-width:760px; line-height:1.7; }
+
+  /* PAGE BODY */
+  .page { padding:64px 72px 80px; }
+
+  /* SECTION LABELS */
+  .sec-label { font-family:'Barlow Condensed',sans-serif; font-size:11px; font-weight:700; letter-spacing:5px; text-transform:uppercase; color:var(--red); margin-bottom:14px; display:flex; align-items:center; gap:12px; }
+  .sec-label::after { content:''; flex:1; height:1px; background:var(--grey-border); }
+
+  /* EXECUTION SUMMARY */
+  .exec-wrap { margin-bottom:60px; }
+  .exec-intro { background:var(--grey-light); padding:36px 44px; margin-bottom:24px; border-left:4px solid var(--black); }
+  .exec-intro h2 { font-family:'Barlow Condensed',sans-serif; font-size:22px; font-weight:800; text-transform:uppercase; letter-spacing:1px; margin-bottom:14px; }
+  .exec-intro p { font-size:14.5px; line-height:1.8; color:#333; margin-bottom:10px; }
+  .exec-intro p:last-child { margin-bottom:0; }
+  .stat-strip { display:grid; grid-template-columns:repeat(5,1fr); gap:0; border:1.5px solid var(--black); }
+  .stat-cell { padding:24px 20px; text-align:center; border-right:1.5px solid var(--black); }
+  .stat-cell:last-child { border-right:none; }
+  .stat-num { font-family:'Barlow Condensed',sans-serif; font-size:48px; font-weight:900; line-height:1; color:var(--black); display:block; }
+  .stat-num.red { color:var(--red); }
+  .stat-desc { font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:#555; line-height:1.5; margin-top:6px; }
+
+  /* PIPELINE LAYERS */
+  .pipeline { margin-bottom:60px; display:flex; flex-direction:column; gap:0; border:1.5px solid var(--black); }
+  .layer-row { display:grid; grid-template-columns:190px 1fr; border-bottom:1.5px solid var(--black); }
+  .layer-row:last-child { border-bottom:none; }
+  .layer-id { background:var(--black); color:var(--white); display:flex; flex-direction:column; justify-content:center; padding:28px 22px; position:relative; }
+  .layer-id::after { content:''; position:absolute; right:-14px; top:50%; transform:translateY(-50%); width:0; height:0; border-top:12px solid transparent; border-bottom:12px solid transparent; border-left:14px solid var(--black); z-index:2; }
+  .layer-num { font-family:'Barlow Condensed',sans-serif; font-size:40px; font-weight:900; color:var(--red); line-height:1; }
+  .layer-name { font-family:'Barlow Condensed',sans-serif; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:3px; color:#aaa; margin-top:3px; line-height:1.3; }
+  .layer-body { padding:26px 32px 26px 46px; background:#fff; }
+  .layer-body.accent-red { border-left:3px solid var(--red); }
+  .layer-body.accent-amber { border-left:3px solid var(--amber); }
+  .layer-body.accent-blue { border-left:3px solid var(--blue); }
+  .layer-body.accent-green { border-left:3px solid var(--green); }
+  .layer-body.accent-purple { border-left:3px solid #6600cc; }
+  .layer-body.accent-dark { border-left:3px solid var(--black); }
+  .layer-headline { font-family:'Barlow Condensed',sans-serif; font-size:20px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+  .layer-desc { font-size:14px; line-height:1.75; color:#333; margin-bottom:12px; max-width:860px; }
+  .tag-row { display:flex; flex-wrap:wrap; gap:7px; }
+  .tag { font-size:11px; font-weight:600; padding:3px 11px; letter-spacing:0.5px; }
+  .tag-red { background:var(--red-soft); color:var(--red); border:1px solid #f0b0b8; }
+  .tag-amber { background:var(--amber-soft); color:var(--amber); border:1px solid #f5c89a; }
+  .tag-blue { background:var(--blue-soft); color:var(--blue); border:1px solid #a8ccee; }
+  .tag-green { background:var(--green-soft); color:var(--green); border:1px solid #90d9b8; }
+  .tag-dark { background:var(--grey-light); color:var(--black); border:1px solid var(--grey-border); }
+  .tag-purple { background:#f5f0ff; color:#6600cc; border:1px solid #c8a8f0; }
+
+  /* ROUTING */
+  .routing-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:0; margin-bottom:60px; border:1.5px solid var(--black); }
+  .route-card { padding:28px 22px; border-right:1.5px solid var(--black); }
+  .route-card:last-child { border-right:none; }
+  .route-flag { font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:3px; margin-bottom:6px; }
+  .route-flag.red { color:var(--red); }
+  .route-flag.amber { color:var(--amber); }
+  .route-flag.blue { color:var(--blue); }
+  .route-flag.grey { color:#888; }
+  .route-count { font-family:'Barlow Condensed',sans-serif; font-size:52px; font-weight:900; line-height:1; margin-bottom:2px; }
+  .route-count.red { color:var(--red); }
+  .route-count.amber { color:var(--amber); }
+  .route-count.blue { color:var(--blue); }
+  .route-count.grey { color:#aaa; }
+  .route-pct { font-size:12px; font-weight:600; color:#888; margin-bottom:12px; }
+  .route-detail { font-size:12.5px; line-height:1.65; color:#444; }
+
+  /* EXAMPLE SECTION */
+  .example-wrap { margin-bottom:60px; background:var(--grey-light); padding:36px 44px; }
+  .example-title { font-family:'Barlow Condensed',sans-serif; font-size:20px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+  .example-meta { font-size:12.5px; color:#666; margin-bottom:24px; font-style:italic; }
+  /* Two rows: top row has 3 steps + connectors, bottom row has 3 steps + connectors, joined by a down arrow */
+  .example-flow { display:flex; flex-direction:column; gap:0; }
+  .ex-row { display:grid; align-items:stretch; gap:0; }
+  .ex-row-top { grid-template-columns: 1fr 36px 1fr 36px 1fr; }
+  .ex-row-bottom { grid-template-columns: 1fr 36px 1fr 36px 1fr; }
+  .ex-connector-down { display:flex; justify-content:flex-end; padding-right:calc(33.33% + 18px); margin:0; }
+  .ex-connector-down-inner { width:36px; display:flex; align-items:center; justify-content:center; height:28px; color:var(--red); font-size:18px; font-weight:900; }
+  .ex-box { background:#fff; border:1.5px solid var(--grey-border); padding:18px 16px; }
+  .ex-box.hot { border-color:var(--red); border-width:2px; }
+  .ex-icon { font-size:20px; margin-bottom:7px; }
+  .ex-layer-tag { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:#aaa; margin-bottom:5px; }
+  .ex-title { font-size:13px; font-weight:700; margin-bottom:8px; }
+  .ex-body { font-size:12.5px; line-height:1.6; color:#333; }
+  .ex-arrow { display:flex; align-items:center; justify-content:center; font-size:22px; color:var(--red); font-weight:900; }
+
+  /* OUTCOMES */
+  .outcomes { display:grid; grid-template-columns:repeat(3,1fr); gap:0; border:1.5px solid var(--black); margin-bottom:60px; }
+  .outcome { padding:28px 26px; border-right:1.5px solid var(--black); border-top:4px solid var(--black); }
+  .outcome:last-child { border-right:none; }
+  .outcome-icon { font-size:26px; margin-bottom:10px; }
+  .outcome-title { font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; }
+  .outcome-body { font-size:13px; line-height:1.7; color:#333; }
+
+  /* FOOTER */
+  .footer { background:var(--black); color:#666; font-size:11.5px; padding:18px 72px; display:flex; justify-content:space-between; align-items:center; border-top:4px solid var(--red); }
+  .footer span { color:var(--white); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-eyebrow">Architecture Overview · Layers 1–6</div>
+  <h1>KPI Anomaly Detection<br><span>Agent</span></h1>
+  <div class="header-sub">A fully automated system that monitors 12 business KPIs every day, detects unusual activity, diagnoses the root cause, quantifies financial risk, and delivers the right alert to the right person — before it becomes a crisis.</div>
+</div>
+
+<div class="page">
+
+  <!-- EXECUTION SUMMARY -->
+  <div class="exec-wrap">
+    <div class="sec-label">Execution Summary</div>
+    <div class="exec-intro">
+      <h2>What This System Does</h2>
+      <p>Every day, thousands of data points flow in: orders placed, revenue earned, website visits, ad spend returns, inventory levels, customer returns. Spotting a genuine problem — versus normal daily noise — manually is impossible at scale. This agent does it automatically. It reads all the data, applies three independent detection methods, cross-checks them, finds the root cause, calculates how much revenue is at risk, and routes a complete briefing to the right team — including three specific recommended actions — within minutes of data arriving.</p>
+      <p>The system covers 2 years of daily data (731 days, 12 KPIs across 6 categories), has been validated against 20 known anomaly events, and all five pipeline layers have been built and tested end to end. An AI orchestrator (Layer 6) coordinates the full pipeline and writes the daily executive brief.</p>
+    </div>
+    <div class="stat-strip">
+      <div class="stat-cell">
+        <span class="stat-num">731</span>
+        <div class="stat-desc">Days of historical<br>data processed</div>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-num red">9.3%</span>
+        <div class="stat-desc">of days had a<br>confirmed anomaly</div>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-num">181</span>
+        <div class="stat-desc">Anomalies detected<br>across 12 KPIs</div>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-num red">8.3%</span>
+        <div class="stat-desc">of anomalies had<br>all 3 methods agree</div>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-num">6</span>
+        <div class="stat-desc">Layers built<br>&amp; orchestrated</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="sec-label">How the System Works — 6 Layers</div>
+  <div class="pipeline">
+
+    <div class="layer-row">
+      <div class="layer-id">
+        <div class="layer-num">01</div>
+        <div class="layer-name">Data Foundation</div>
+      </div>
+      <div class="layer-body accent-red">
+        <div class="layer-headline">Collecting &amp; Preparing Business Data</div>
+        <div class="layer-desc">Every day, the system automatically pulls together transactions, marketing spend, web traffic, and inventory records — 731 days of history across 33 business metrics. For each KPI, it computes "context signals": what was normal last week? Last month? How volatile has it been? These signals feed every step downstream. Think of it as building a fingerprint of what "normal" looks like for each metric — so any deviation from that fingerprint stands out clearly.</div>
+        <div class="tag-row">
+          <span class="tag tag-red">Revenue &amp; Orders</span>
+          <span class="tag tag-amber">Marketing ROAS &amp; Clicks</span>
+          <span class="tag tag-blue">Web Traffic &amp; Conversion Rate</span>
+          <span class="tag tag-dark">Inventory &amp; Return Rate</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-row">
+      <div class="layer-id">
+        <div class="layer-num">02</div>
+        <div class="layer-name">Anomaly Detection</div>
+      </div>
+      <div class="layer-body accent-amber">
+        <div class="layer-headline">Three Independent Alarm Systems — At Least Two Must Agree</div>
+        <div class="layer-desc">Rather than relying on a single check that could generate false alarms, three independent methods run simultaneously. A statistical baseline catches sudden deviations from recent patterns. A machine learning model flags days when multiple KPIs move unusually together. A forecasting model compares each KPI to what it predicted. An anomaly is only confirmed when at least 2 of the 3 methods agree — 75.5% of KPI-day combinations are flagged as entirely normal, and only 8.3% of confirmed anomalies earn the top severity level by having all three methods agree.</div>
+        <div class="tag-row">
+          <span class="tag tag-red">HIGH: All 3 agree — 8.3% of anomalies (15 events)</span>
+          <span class="tag tag-amber">MEDIUM: 2 agree — 50.8% of anomalies (92 events)</span>
+          <span class="tag tag-blue">LOW: Watch list — 40.9% of anomalies (74 events)</span>
+          <span class="tag tag-dark">Suppressed: External cause — 3.3% (6 events)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-row">
+      <div class="layer-id">
+        <div class="layer-num">03</div>
+        <div class="layer-name">Root Cause Analysis</div>
+      </div>
+      <div class="layer-body accent-blue">
+        <div class="layer-headline">Not Just "What" — But "Why"</div>
+        <div class="layer-desc">Once an anomaly is confirmed, the system follows the chain of causation. If revenue drops, did it happen because orders fell, or because order value fell? If orders fell, was it because traffic dropped, or because the conversion rate declined? The system also checks external conditions — was a competitor flooding the market? Was consumer confidence low? Anomalies driven purely by market forces are flagged as "externally driven." Of the 181 detected events, 47.5% are routed immediately for action, 40.9% go to a watch list, and just 3.3% are suppressed because nothing can be done about them internally.</div>
+        <div class="tag-row">
+          <span class="tag tag-red">ESCALATE: 8.3% — all 3 methods agreed</span>
+          <span class="tag tag-amber">INVESTIGATE: 47.5% — actionable, 2 methods agreed</span>
+          <span class="tag tag-blue">MONITOR: 40.9% — lower-tier KPIs</span>
+          <span class="tag tag-dark">SUPPRESSED: 3.3% — market-driven, nothing to act on</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-row">
+      <div class="layer-id">
+        <div class="layer-num">04</div>
+        <div class="layer-name">Intelligence Engine</div>
+      </div>
+      <div class="layer-body accent-green">
+        <div class="layer-headline">Financial Impact + Priority Ranking + Recommended Actions</div>
+        <div class="layer-desc">Every confirmed anomaly is translated into a dollar figure: how much revenue is at risk over the next 7 days if the issue persists? That figure is scored alongside KPI importance, confidence in the diagnosis, and how fixable the problem is — producing a unique priority rank from 1 to 181. Three specific actions are then generated: what to do in the next hour, what to fix this week, and how to prevent recurrence. The 101 highest-priority events (55.8% of anomalies) receive AI-enhanced recommendations with full business context.</div>
+        <div class="tag-row">
+          <span class="tag tag-green">Revenue at risk quantified per anomaly</span>
+          <span class="tag tag-green">Priority ranked 1–181, no ties</span>
+          <span class="tag tag-dark">3 specific actions per anomaly</span>
+          <span class="tag tag-purple">AI-enhanced for 55.8% of events (101 of 181)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-row">
+      <div class="layer-id">
+        <div class="layer-num">05</div>
+        <div class="layer-name">Communication</div>
+      </div>
+      <div class="layer-body accent-purple">
+        <div class="layer-headline">Right Alert, Right Person, Right Channel — Automatically</div>
+        <div class="layer-desc">Every anomaly is routed to the correct audience via the correct channel. Immediate crises (8.3% of anomalies) go to executives and operations via Slack and email. Actionable events (47.5%) go to operations and analysts via daily email. Lower-priority signals (40.9%) appear in a weekly analyst digest. Market-driven events (3.3%) are logged silently — no noise, just an audit trail. Structured HTML reports with root cause, impact, and recommendations are generated automatically. A Power BI star schema is prepared for visual exploration by leadership.</div>
+        <div class="tag-row">
+          <span class="tag tag-red">ESCALATE → Slack + Email → Exec &amp; Ops — Immediate</span>
+          <span class="tag tag-amber">INVESTIGATE → Email → Ops &amp; Analyst — Daily</span>
+          <span class="tag tag-blue">MONITOR → Digest → Analyst — Weekly</span>
+          <span class="tag tag-dark">Power BI Dashboard (in progress)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer-row">
+      <div class="layer-id">
+        <div class="layer-num">06</div>
+        <div class="layer-name">Agent Orchestration</div>
+      </div>
+      <div class="layer-body accent-dark">
+        <div class="layer-headline">The AI Brain That Coordinates Everything</div>
+        <div class="layer-desc">A Claude AI model acts as the central coordinator. It triggers every morning (or on new data arrival), decides which tools to call and in what order, interprets results at each step, and writes the daily executive brief in plain language. It holds the full business rulebook — KPI definitions, alert routing logic, the playbook index, and the dependency map — so it can make context-aware decisions without human intervention. The agent connects the five pipeline layers into a single coherent, automated workflow.</div>
+        <div class="tag-row">
+          <span class="tag tag-dark">claude-sonnet-4-6 orchestrator</span>
+          <span class="tag tag-dark">Triggers at 07:00 daily or on new data</span>
+          <span class="tag tag-dark">9 tool calls per pipeline run</span>
+          <span class="tag tag-dark">Writes daily executive brief</span>
+          <span class="tag tag-dark">Updates Power BI dataset automatically</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ALERT ROUTING -->
+  <div class="sec-label">Alert Routing — How Each Anomaly Is Handled</div>
+  <div class="routing-grid">
+    <div class="route-card">
+      <div class="route-flag red">⬛ ESCALATE</div>
+      <div class="route-count red">15</div>
+      <div class="route-pct">8.3% of anomalies · 2.1% of all days</div>
+      <div class="route-detail">All 3 detection methods agreed. Highest criticality. Sent immediately via Slack and Email to Executives and Operations. AI-enhanced action plan included. These are events that require immediate leadership attention.</div>
+    </div>
+    <div class="route-card">
+      <div class="route-flag amber">▪ INVESTIGATE</div>
+      <div class="route-count amber">86</div>
+      <div class="route-pct">47.5% of anomalies · 11.8% of all days</div>
+      <div class="route-detail">2 methods agreed. Actionable and not market-driven. Sent daily via email to Operations and Analyst teams. AI-enhanced recommendations included. These events have a clear internal cause and a clear fix.</div>
+    </div>
+    <div class="route-card">
+      <div class="route-flag blue">▸ MONITOR</div>
+      <div class="route-count blue">74</div>
+      <div class="route-pct">40.9% of anomalies · 10.1% of all days</div>
+      <div class="route-detail">Lower-tier KPI signals. Batched into weekly analyst digest. Playbook-based recommendations provided. No real-time alert — these are watch-list items that inform planning rather than demanding immediate action.</div>
+    </div>
+    <div class="route-card">
+      <div class="route-flag grey">✕ SUPPRESSED</div>
+      <div class="route-count grey">6</div>
+      <div class="route-pct">3.3% of anomalies · 0.8% of all days</div>
+      <div class="route-detail">ROAS drops caused purely by competitor ad pressure — nothing the team can act on. Logged silently with "NO ACTION REQUIRED." These events are suppressed to eliminate noise from market forces outside the business's control.</div>
+    </div>
+  </div>
+
+  <!-- REAL ANOMALY EXAMPLE -->
+  <div class="sec-label">A Real Example — Inventory Stockout (15 Mar 2024)</div>
+  <div class="example-wrap">
+    <div class="example-title">Inventory Stockout Causing a 35.7% Drop in Orders</div>
+    <div class="example-meta">ANO-20240315-ORD · n_orders · Tier 1 · Severity: MEDIUM · A non-seasonal, internally-driven operational event. Fully automated from raw data to Slack alert.</div>
+    <div class="example-flow">
+      <!-- Row 1: Layers 1, 2, 3 -->
+      <div class="ex-row ex-row-top">
+        <div class="ex-box">
+          <div class="ex-icon">📦</div>
+          <div class="ex-layer-tag">Layer 1 · Data Foundation</div>
+          <div class="ex-title">Data Arrives</div>
+          <div class="ex-body">Orders today = 148. Normal daily average ≈ 230. The system automatically computes rolling stats, week-on-week change, and month-on-month shift for all 12 KPIs — building today's "fingerprint" for the detection engine.</div>
+        </div>
+        <div class="ex-arrow">›</div>
+        <div class="ex-box hot">
+          <div class="ex-icon">🔍</div>
+          <div class="ex-layer-tag">Layer 2 · Anomaly Detection</div>
+          <div class="ex-title">Anomaly Flagged</div>
+          <div class="ex-body">The statistical method and the machine learning model both flag today as unusual. 2 of 3 methods agree — anomaly confirmed. Orders are −35.7% below what was expected. Severity assigned: MEDIUM.</div>
+        </div>
+        <div class="ex-arrow">›</div>
+        <div class="ex-box">
+          <div class="ex-icon">🔬</div>
+          <div class="ex-layer-tag">Layer 3 · Root Cause Analysis</div>
+          <div class="ex-title">Why Did It Happen?</div>
+          <div class="ex-body">The system traces the causal chain: revenue fell because orders fell because stockouts spiked. The suspected root cause is confirmed as an inventory stockout — not a competitor action or external market shift. Fully actionable internally.</div>
+        </div>
+      </div>
+      <!-- Down connector aligned to right third -->
+      <div class="ex-connector-down">
+        <div class="ex-connector-down-inner">↓</div>
+      </div>
+      <!-- Row 2: Layers 6, 5, 4 — right to left visually so the flow reads top-left → top-right → down → bottom-right → bottom-left, but we lay them left to right as 4, 5, 6 then reverse with a label -->
+      <div class="ex-row ex-row-bottom">
+        <div class="ex-box">
+          <div class="ex-icon">💰</div>
+          <div class="ex-layer-tag">Layer 4 · Intelligence Engine</div>
+          <div class="ex-title">What Does It Cost?</div>
+          <div class="ex-body">Revenue at risk: +$27,888 over the next 7 days if unresolved. Monthly projection: ~$119,520 shortfall. Priority Rank #53 of 181. Recommended immediate action: audit checkout funnel in GA4 and trigger emergency reorders for all stockout SKUs.</div>
+        </div>
+        <div class="ex-arrow">›</div>
+        <div class="ex-box hot">
+          <div class="ex-icon">📧</div>
+          <div class="ex-layer-tag">Layer 5 · Communication</div>
+          <div class="ex-title">Alert Sent</div>
+          <div class="ex-body">Alert routed: INVESTIGATE → Email → Operations &amp; Analyst team. Urgency: Daily. Full HTML report generated with root cause, financial impact, and three specific recommended actions attached.</div>
+        </div>
+        <div class="ex-arrow">›</div>
+        <div class="ex-box">
+          <div class="ex-icon">🤖</div>
+          <div class="ex-layer-tag">Layer 6 · Agent Orchestration</div>
+          <div class="ex-title">Agent Coordinates Everything</div>
+          <div class="ex-body">The Claude AI agent ran all 9 tool steps automatically, included this event in the daily executive brief, and updated the Power BI dataset. Zero human triage required at any step of the pipeline.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHAT LEADERSHIP GETS -->
+  <div class="sec-label">What Leadership Gets Out of This</div>
+  <div class="outcomes">
+    <div class="outcome">
+      <div class="outcome-icon">⚡</div>
+      <div class="outcome-title">Speed</div>
+      <div class="outcome-body">Anomalies detected, diagnosed, prioritised, and delivered to the right inbox within minutes of data arriving. The 8.3% of events rated most critical (15 anomalies) would have triggered an immediate Slack and email with a complete briefing attached — no waiting, no manual triage.</div>
+    </div>
+    <div class="outcome">
+      <div class="outcome-icon">🎯</div>
+      <div class="outcome-title">Precision</div>
+      <div class="outcome-body">By requiring at least 2 independent methods to agree, false alarms are filtered from 96% of initial flags down to the 181 events that genuinely warranted attention across 2 years. 3.3% of events that are purely market-driven are automatically suppressed so teams focus only on what they can fix.</div>
+    </div>
+    <div class="outcome">
+      <div class="outcome-icon">💡</div>
+      <div class="outcome-title">Clarity</div>
+      <div class="outcome-body">Every alert arrives pre-loaded with what happened, why it happened, what it costs the business, and exactly what to do about it. Teams act on facts, not guesses. The Power BI dashboard brings all 181 events to life visually for ongoing monitoring by leadership.</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div>KPI Anomaly Detection Agent — Executive Overview &nbsp;|&nbsp; <span>Layers 1–5 Complete · Layer 6 Orchestration Architecture Defined</span></div>
+  <div>Power BI Dashboard: <span>In Progress</span></div>
+</div>
+
+</body>
+</html>

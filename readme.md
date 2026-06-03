@@ -1490,162 +1490,619 @@ Copy any of the checks above into a Python session or the `scripts/3_Quality_Tes
 
 ## LAYER 4 — Intelligence Engine
 
+Four scripts run sequentially on `rca_assembly.csv` (181 × 45) and produce `intelligence_results.csv` (181 × 68) — the certified Layer 4 output passed to Layer 5.
+
+| Script | Output | Shape | Key additions |
+|---|---|---|---|
+| `4.1_business_impact_quantification.py` | `impact_results.csv` | 181 × 51 | `revenue_at_risk`, `margin_impact`, `customer_impact`, `monthly_shortfall`, `impact_pct_of_plan`, `impact_narrative` |
+| `4.2_prioritization_engine.py` | `priority_results.csv` | 181 × 59 | `priority_score`, `priority_band`, `priority_rank`, 5 factor columns |
+| `4.3_recommendation_engine.py` | `recommendations.csv` | 181 × 68 | `immediate_action`, `short_term_fix`, `preventive_measure`, `playbook_key`, `llm_enhanced` |
+| `4.4_intelligence_assembly.py` | `intelligence_results.csv` | 181 × 68 | Validated, certified final Layer 4 output (12 internal quality assertions run before write) |
+
+---
+
 ### Step 4.1 — Business Impact Quantification
 
-```python
-def calculate_impact(anomaly):
-    revenue_at_risk = (expected - actual) * forward_days   # 7-day projection
-    margin_impact   = revenue_at_risk * avg_gross_margin
-    customer_impact = estimate_affected_customers(anomaly.kpi)
-    return ImpactScore(revenue_at_risk, margin_impact, customer_impact)
+Translates each anomaly into dollar-denominated impact using KPI-specific formulas. All baselines derive from `master_dataset.csv` (period averages) and `products.csv` (gross margin).
+
+**Constants:** `FORWARD_DAYS = 7`, `ROAS_REVENUE_SHARE = 0.30`, `TIER3_DECAY = 0.15`, `AVG_GROSS_MARGIN = 0.4968` (from products.csv)
+
+**Sign convention:** positive `revenue_at_risk` = money at risk (anomaly hurts business) · negative = captured upside (unexpected gain).
+
+**KPI-specific `revenue_at_risk` formulas:**
+
+| KPI | Formula |
+|---|---|
+| `total_revenue_usd` | `(expected − actual) × 7` |
+| `n_orders` | `(expected − actual) × AVG_AOV × 7` |
+| `avg_order_value_usd` | `(expected − actual) × AVG_DAILY_ORDERS × 7` |
+| `avg_roas` | `−deviation_fraction × AVG_DAILY_REVENUE × 0.30 × 7` |
+| `conversion_rate` | `(expected − actual) × AVG_DAILY_SESSIONS × AVG_AOV × 7` |
+| `return_rate` | `(actual − expected) × AVG_DAILY_ORDERS × AVG_AOV × 7` |
+| `n_stockouts` | `(actual − expected) × AVG_REVENUE_PER_SKU × 7` |
+| `bounce_rate` | `(actual − expected) × AVG_DAILY_SESSIONS × AVG_CVR × AVG_AOV × 7` |
+| `sessions` | `(expected − actual) × AVG_CVR × AVG_AOV × 7` |
+| `total_clicks` | `(expected − actual) × (AVG_DAILY_REVENUE / AVG_DAILY_CLICKS) × 7` |
+| `avg_discount_pct` | `(actual − expected) × AVG_DAILY_REVENUE × 7` |
+| `inventory_health` | `−deviation_fraction × AVG_DAILY_REVENUE × 0.15 × 7` |
+
+```
+margin_impact    = revenue_at_risk × AVG_GROSS_MARGIN
+customer_impact  = max(1, round(|revenue_at_risk| / AVG_AOV × CUSTOMERS_PER_ORDER))
+monthly_shortfall = revenue_at_risk × (30 / 7)
+impact_pct_of_plan = (revenue_at_risk / 7 / AVG_DAILY_REVENUE) × 100
 ```
 
-**Impact statement format:**
-> "Revenue is tracking $28,400 below forecast for the week. At current trajectory, this represents a $118,000 monthly shortfall — 8.3% below plan. Approximately 1,200 customers experienced degraded conversion."
+**Impact narrative (stored in `impact_narrative`):**
+- Downside: `"{Label} is tracking ${risk:,.0f} below forecast for the week. At current trajectory, this represents a ${monthly:,.0f} monthly shortfall — {pct:.1f}% below plan. Approximately {customers:,} customers experienced degraded {label}."`
+- Upside: `"{Label} surged {dev:+.1f}% above forecast. Weekly revenue uplift: +${risk:,.0f} (+${monthly:,.0f} monthly, {pct:.1f}% above plan). Approximately {customers:,} customers contributed to the uplift."`
+
+**Black Friday spot-check:** `revenue_at_risk = −$319,977` — negative sign confirms captured upside, not money at risk.
+
+---
 
 ### Step 4.2 — Prioritization Engine
 
-Each confirmed anomaly receives a composite priority score:
+Each anomaly receives a composite priority score (0–1) from five weighted factors, then a priority band and a unique integer rank.
 
-| Factor               | Weight | Scoring Logic                                      |
-|----------------------|--------|----------------------------------------------------|
-| Revenue impact ($)   | 35%    | Log-scaled absolute dollar impact                  |
-| KPI tier             | 25%    | Tier 1 = 1.0, Tier 2 = 0.6, Tier 3 = 0.3          |
-| Causal confidence    | 20%    | CausalImpact posterior probability                 |
-| Recoverability       | 10%    | Is there an actionable fix available?              |
-| External driver?     | 10%    | Penalise if macro-driven (reduces urgency)         |
+| Factor | Weight | Scoring logic |
+|---|---|---|
+| Revenue impact | 35% | `log10(|revenue_at_risk|) / log10(max_risk)` — log-scaled absolute impact, normalised to [0, 1] |
+| KPI tier | 25% | Tier 1 = 1.0 · Tier 2 = 0.6 · Tier 3 = 0.3 |
+| Causal confidence | 20% | `root_cause_confidence` where available; severity fallback for NaN: HIGH=0.80, MEDIUM=0.50, LOW=0.30 |
+| Recoverability | 10% | `actionability_score` from Step 3.3 (1.0 = fully actionable · 0.45 = externally driven) |
+| External driver | 10% | 1.0 if not externally driven · 0.45 if externally driven (mirrors Step 3.3 penalty) |
 
 ```
-Priority Score = Σ(factor × weight)
-HIGH   > 0.75  → page on-call, create P1 ticket
-MEDIUM 0.5–0.75 → Slack alert, create P2 ticket
-LOW    < 0.5   → daily digest only
+priority_score = Σ(weight × factor)          [guaranteed in (0, 1)]
+priority_band  = HIGH (> 0.75) | MEDIUM (0.50–0.75) | LOW (< 0.50)
+priority_rank  = rank(descending, method='first') → unique integers 1–181, no ties
 ```
+
+**Results in this dataset:**
+
+| Band | Count | Score range | Action |
+|---|---|---|---|
+| HIGH | 15 | 0.8330–0.9911 | Page on-call, P1 ticket |
+| MEDIUM | 92 | 0.50–0.75 | Slack alert, P2 ticket |
+| LOW | 74 | 0.4311–0.50 | Daily digest only |
+
+Score stats across all 181: min = 0.4311 (near-zero-impact Tier 3) · max = 0.9911 (Black Friday revenue spike, rank #1) · mean = 0.7283
+
+---
 
 ### Step 4.3 — Recommendation Engine
 
-A **playbook lookup + LLM generation** hybrid:
+A **playbook lookup + Claude API hybrid** applied to all 181 anomalies.
 
-**Playbook (rule-based, deterministic):**
+**Step A — Deterministic playbook lookup (all 181 rows):**
+
+The playbook is a dictionary keyed by `(kpi, direction, suspected_driver_kpi)` 3-tuples. Lookup priority: exact 3-tuple match first, then `(kpi, direction, None)` direction-only fallback. 30 entries cover all 12 KPIs in both UP and DOWN directions, with driver-specific variants for the most common root causes.
 
 ```python
 PLAYBOOKS = {
-    "roas_collapse + paid_search": [
-        "Pause underperforming ad groups above $50 CPA",
-        "Shift 30% of budget to email/organic for next 48h",
-        "Review bid strategy — check if competitor surge caused CPCs to spike"
-    ],
-    "conversion_rate_drop + bounce_rate_spike": [
-        "Check latest deployment for landing page regressions",
-        "Review mobile vs desktop split — isolate breakage",
-        "Rollback A/B test if change was deployed in last 24h"
-    ],
-    "stockout + n_orders_drop": [
-        "Trigger emergency reorder for top 20 SKUs by revenue contribution",
-        "Surface in-stock alternatives in recommendation engine",
-        "Notify merchandising team for supplier escalation"
-    ]
+    ("avg_roas", "DOWN", "total_clicks"): {          # specific 3-tuple
+        "immediate"  : "Pause ad groups with CPA > $50; audit for policy violations",
+        "short_term" : "Run auction insights; review keyword targeting and negative lists",
+        "preventive" : "Build ROAS+click co-monitoring with auto-alert at 20% below 30-day average",
+        "owner": "Performance Marketing",  "effort": "H",
+    },
+    ("avg_roas", "DOWN", None): {                    # direction-only fallback
+        "immediate"  : "Pause underperforming ad groups > $50 CPA; check pixel/attribution",
+        "short_term" : "Shift 30% of budget to email/organic; review bid strategy vs target ROAS",
+        "preventive" : "Set ROAS floor alerts at 20% below 30-day average; quarterly attribution review",
+        "owner": "Performance Marketing",  "effort": "M",
+    },
+    # ... 28 more entries (all 12 KPIs × UP/DOWN, with driver-specific variants)
 }
 ```
 
-**LLM Enhancement (Claude, context-aware):**
+**Step B — LLM enhancement via Claude API (101 ESCALATE + INVESTIGATE rows):**
 
-The agent passes the full anomaly context to Claude and requests:
-- Immediate action (next 24h)
-- Short-term fix (next 7 days)
-- Preventive measure (next 30 days)
+`claude-haiku-4-5-20251001` is used for the 101 actionable anomalies. MONITOR (74) and SUPPRESSED (6) rows receive playbook text only — no LLM call. This avoids paying for real-time inference on daily-digest and externally-suppressed anomalies.
+
+**Prompt caching** is applied to the system prompt (`"cache_control": {"type": "ephemeral"}`). The system prompt (~900 tokens covering business profile, KPI ownership, glossary, dependency chain, and output format rules) is transmitted once and read from cache for all subsequent calls.
 
 ```python
-prompt = f"""
-Anomaly: {anomaly.kpi} dropped {anomaly.deviation_pct}% on {anomaly.date}
-Root cause: {root_cause.description} (confidence: {root_cause.confidence}%)
-Business impact: ${impact.revenue_at_risk:,.0f} at risk over 7 days
-External context: {external_drivers_summary}
-Historical precedent: {similar_past_anomalies}
-
-Recommend 3 actions: immediate, short-term, preventive.
-Format: action | owner | expected outcome | effort (H/M/L)
-"""
+client.messages.create(
+    model="claude-haiku-4-5-20251001",
+    max_tokens=350,
+    system=[{
+        "type": "text",
+        "text": SYSTEM_PROMPT,                        # ~900 tokens — business context
+        "cache_control": {"type": "ephemeral"},       # cached after first call
+    }],
+    messages=[{"role": "user", "content": build_user_prompt(row, playbook)}],
+)
+# User prompt includes: KPI, date, severity, deviation, root cause narrative,
+# revenue_at_risk, external context (economic/seasonal/competitive conditions),
+# and the matching playbook baseline to enhance — not repeat verbatim
 ```
+
+**LLM output parsed into three fields:**
+```
+IMMEDIATE  | <actionable task> | <owner team> | <expected outcome> | <effort H/M/L>
+SHORT_TERM | <actionable task> | <owner team> | <expected outcome> | <effort H/M/L>
+PREVENTIVE | <actionable task> | <owner team> | <expected outcome> | <effort H/M/L>
+```
+
+**Coverage:** 101 LLM-enhanced rows · playbook match rate: all 181 rows matched · effort distribution: H=3 (1.7%), M=60 (33.1%), L=118 (65.2%)
+
+---
+
+### Step 4.4 — Intelligence Assembly
+
+Validates the complete Layer 4 pipeline and writes `intelligence_results.csv`. Runs 12 quality assertions before writing — any failure exits the script without touching the output file.
+
+`intelligence_results.csv` carries the same 68 columns as `recommendations.csv`. No new columns are added. The assembly step certifies correctness rather than transforming data.
+
+```
+45 cols (rca_assembly)  +  6 impact  +  8 priority  +  9 recommendation  =  68 total
+```
+
+The 12 internal assertions mirror the external quality tests below (T01–T12). All 14 SQLite tables across Layers 1–4 are validated in T12.
+
+---
+
+## Step 4.5 — Layer 4 Quality Tests
+
+Run these checks after executing the four Layer 4 scripts (`4.1_business_impact_quantification.py`, `4.2_prioritization_engine.py`, `4.3_recommendation_engine.py`, `4.4_intelligence_assembly.py`) in order. All inputs must exist before running. The notebook `scripts/4_Quality_Tests.ipynb` runs all 12 tests end-to-end.
+
+---
+
+#### Test 1 — Shape
+
+`intelligence_results.csv` must have exactly 181 rows and 68 columns: 45 from `rca_assembly` + 6 impact + 8 priority + 9 recommendation.
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+
+assert df.shape == (181, 68), f"Expected (181, 68), got {df.shape}"
+print(f"PASS  Shape: {df.shape}")
+```
+
+Expected:
+```
+PASS  Shape: (181, 68)
+```
+
+---
+
+#### Test 2 — Priority Score Range
+
+`priority_score` is a weighted composite of five factors normalised to [0, 1]. All values must be non-null and within range.
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+ps = df["priority_score"]
+
+assert ps.notna().all(),       "priority_score contains nulls"
+assert ps.between(0, 1).all(), "priority_score out of [0, 1]"
+
+print(f"PASS  priority_score: {ps.notna().sum()} non-null values in [0, 1]")
+print(f"PASS  min = {ps.min():.4f}  max = {ps.max():.4f}  mean = {ps.mean():.4f}")
+```
+
+Expected:
+```
+PASS  priority_score: 181 non-null values in [0, 1]
+PASS  min = 0.4311  max = 0.9911  mean = 0.7283
+```
+
+---
+
+#### Test 3 — Priority Rank Uniqueness
+
+`priority_rank` must be a clean 1–181 integer sequence with no ties or gaps. `method='first'` ranking guarantees this.
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+pr = df["priority_rank"]
+
+assert pr.nunique() == 181,             "priority_rank contains duplicates"
+assert set(pr) == set(range(1, 182)),   "priority_rank is not a clean 1-181 sequence"
+
+print(f"PASS  priority_rank: {pr.nunique()} unique integers  (min={pr.min()}  max={pr.max()})")
+```
+
+Expected:
+```
+PASS  priority_rank: 181 unique integers  (min=1  max=181)
+```
+
+---
+
+#### Test 4 — ESCALATE Anomalies → HIGH Priority Band
+
+All 15 HIGH-severity anomalies (Tier 1 KPIs where all 3 detection methods agreed) have `layer4_priority_flag = ESCALATE` and must score above the 0.75 threshold.
+
+```python
+import pandas as pd
+
+df  = pd.read_csv("data/intelligence_results.csv")
+esc = df[df["layer4_priority_flag"] == "ESCALATE"]
+
+assert len(esc) == 15,                         f"Expected 15 ESCALATE rows, got {len(esc)}"
+assert (esc["priority_band"] == "HIGH").all(), "Some ESCALATE anomalies not in HIGH band"
+
+print(f"PASS  ESCALATE rows              : {len(esc)} / 15")
+print(f"PASS  All in HIGH band           : {(esc['priority_band']=='HIGH').sum()} / {len(esc)}")
+print(f"PASS  Score range (ESCALATE)     : {esc['priority_score'].min():.4f} – {esc['priority_score'].max():.4f}")
+```
+
+Expected:
+```
+PASS  ESCALATE rows              : 15 / 15
+PASS  All in HIGH band           : 15 / 15
+PASS  Score range (ESCALATE)     : 0.8330 – 0.9911
+```
+
+---
+
+#### Test 5 — SUPPRESSED Routing Integrity
+
+The 6 suppressed anomalies (`avg_roas` DOWN driven by competitive marketing pressure) must never receive LLM calls, must retain `escalation_suppressed = True`, and must all be MEDIUM severity. HIGH anomalies are never suppressible — enforced by Step 3.3.
+
+```python
+import pandas as pd
+
+df  = pd.read_csv("data/intelligence_results.csv")
+sup = df[df["layer4_priority_flag"] == "SUPPRESSED"]
+
+assert len(sup) == 6,                      f"Expected 6 SUPPRESSED rows, got {len(sup)}"
+assert (~sup["llm_enhanced"]).all(),       "Some SUPPRESSED rows received LLM calls"
+assert sup["escalation_suppressed"].all(), "Some SUPPRESSED rows have escalation_suppressed=False"
+assert (sup["severity"] == "MEDIUM").all(),"Some SUPPRESSED rows are not MEDIUM severity"
+
+print(f"PASS  SUPPRESSED rows          : {len(sup)} / 6")
+print(f"PASS  llm_enhanced = False     : {(~sup['llm_enhanced']).sum()} / {len(sup)}")
+print(f"PASS  escalation_suppressed    : {sup['escalation_suppressed'].sum()} / {len(sup)}")
+print(f"PASS  All MEDIUM severity      : {(sup['severity']=='MEDIUM').sum()} / {len(sup)}")
+```
+
+Expected:
+```
+PASS  SUPPRESSED rows          : 6 / 6
+PASS  llm_enhanced = False     : 6 / 6
+PASS  escalation_suppressed    : 6 / 6
+PASS  All MEDIUM severity      : 6 / 6
+```
+
+---
+
+#### Test 6 — MONITOR Routing Integrity
+
+All 74 Tier 3 MONITOR anomalies receive deterministic playbook text only — no Claude API calls. These are daily-digest items that do not justify real-time LLM inference cost.
+
+```python
+import pandas as pd
+
+df  = pd.read_csv("data/intelligence_results.csv")
+mon = df[df["layer4_priority_flag"] == "MONITOR"]
+
+assert len(mon) == 74,               f"Expected 74 MONITOR rows, got {len(mon)}"
+assert (~mon["llm_enhanced"]).all(), "Some MONITOR rows received LLM calls"
+
+print(f"PASS  MONITOR rows         : {len(mon)} / 74")
+print(f"PASS  llm_enhanced = False : {(~mon['llm_enhanced']).sum()} / {len(mon)}  (playbook text only)")
+print(f"PASS  Tier distribution    : {dict(mon['tier'].value_counts().sort_index())}")
+```
+
+Expected:
+```
+PASS  MONITOR rows         : 74 / 74
+PASS  llm_enhanced = False : 74 / 74  (playbook text only)
+PASS  Tier distribution    : {3: 74}
+```
+
+---
+
+#### Test 7 — Black Friday Spot-Check
+
+The 2024-11-29 `total_revenue_usd` spike (+223.8%) is the highest-priority anomaly. It must rank #1, score in the HIGH band, and have a **negative** `revenue_at_risk` (captured upside — money gained above forecast, not at risk).
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+bf = df[(df["date"] == "2024-11-29") & (df["kpi"] == "total_revenue_usd")].iloc[0]
+
+assert int(bf["priority_rank"]) == 1,     f"Expected rank=1, got {bf['priority_rank']}"
+assert bf["priority_band"] == "HIGH",      f"Expected HIGH, got {bf['priority_band']}"
+assert float(bf["revenue_at_risk"]) < 0,  "Expected negative revenue_at_risk (captured upside)"
+assert bf["llm_enhanced"],                "Expected llm_enhanced=True for ESCALATE row"
+
+print(f"PASS  anomaly_id      : {bf['anomaly_id']}")
+print(f"PASS  priority_rank   : #{int(bf['priority_rank'])}  (highest priority in dataset)")
+print(f"PASS  priority_band   : {bf['priority_band']}  (score={bf['priority_score']:.4f})")
+print(f"PASS  revenue_at_risk : ${bf['revenue_at_risk']:,.0f}  (negative = captured upside)")
+print(f"PASS  monthly_uplift  : ${bf['monthly_shortfall']:,.0f}")
+print(f"PASS  deviation_pct   : {bf['deviation_pct']:+.1f}%")
+```
+
+Expected:
+```
+PASS  anomaly_id      : ANO-20241129-REV
+PASS  priority_rank   : #1  (highest priority in dataset)
+PASS  priority_band   : HIGH  (score=0.9911)
+PASS  revenue_at_risk : $-319,977  (negative = captured upside)
+PASS  monthly_uplift  : $-1,371,330
+PASS  deviation_pct   : +223.8%
+```
+
+---
+
+#### Test 8 — Inventory Stockout Spot-Check
+
+The 2024-03-15 `n_orders` anomaly (−35.7%) must have positive `revenue_at_risk`, a matched playbook, and `llm_enhanced = True` (INVESTIGATE-routed anomaly).
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+sk = df[(df["date"] == "2024-03-15") & (df["kpi"] == "n_orders")].iloc[0]
+
+assert float(sk["revenue_at_risk"]) > 0, "Expected positive revenue_at_risk (at risk)"
+assert sk["playbook_match"],             "Expected a playbook match for this anomaly"
+assert sk["llm_enhanced"],              "Expected llm_enhanced=True for INVESTIGATE row"
+
+print(f"PASS  anomaly_id      : {sk['anomaly_id']}")
+print(f"PASS  priority_rank   : #{int(sk['priority_rank'])}")
+print(f"PASS  revenue_at_risk : ${sk['revenue_at_risk']:,.0f}  (positive = at risk)")
+print(f"PASS  playbook_key    : {sk['playbook_key']}")
+print(f"PASS  immediate       : {str(sk['immediate_action'])[:80]}...")
+```
+
+Expected:
+```
+PASS  anomaly_id      : ANO-20240315-ORD
+PASS  priority_rank   : #53
+PASS  revenue_at_risk : $27,888  (positive = at risk)
+PASS  playbook_key    : order_volume_drop
+PASS  immediate       : Audit checkout funnel (cart->payment->confirmation) in GA4; flag payment gateway error...
+```
+
+---
+
+#### Test 9 — Margin Impact Parity
+
+`margin_impact = revenue_at_risk × AVG_GROSS_MARGIN` for every row. Rounding to 2 decimal places introduces a small floating-point delta — maximum allowed deviation is 0.01.
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+prod = pd.read_csv("data/products.csv")
+AVG_GROSS_MARGIN = prod["gross_margin"].mean()
+
+delta     = (df["margin_impact"] - df["revenue_at_risk"] * AVG_GROSS_MARGIN).abs()
+max_delta = delta.max()
+
+assert max_delta < 0.01, f"Max margin parity delta {max_delta:.6f} exceeds 0.01"
+
+print(f"PASS  margin_impact = revenue_at_risk x {AVG_GROSS_MARGIN:.6f}")
+print(f"PASS  Max absolute delta : {max_delta:.6f}  (threshold: 0.01)")
+```
+
+Expected:
+```
+PASS  margin_impact = revenue_at_risk x 0.496782
+PASS  Max absolute delta : 0.007159  (threshold: 0.01)
+```
+
+---
+
+#### Test 10 — LLM Recommendation Coverage
+
+All 101 ESCALATE + non-suppressed INVESTIGATE rows received Claude API calls. Every LLM-enhanced row must have non-empty text in all three recommendation fields.
+
+```python
+import pandas as pd
+
+df  = pd.read_csv("data/intelligence_results.csv")
+llm = df[df["llm_enhanced"]]
+
+empty_imm = (llm["immediate_action"].fillna("").str.strip() == "").sum()
+empty_st  = (llm["short_term_fix"].fillna("").str.strip() == "").sum()
+empty_pr  = (llm["preventive_measure"].fillna("").str.strip() == "").sum()
+
+assert len(llm) == 101,  f"Expected 101 LLM-enhanced rows, got {len(llm)}"
+assert empty_imm == 0
+assert empty_st  == 0
+assert empty_pr  == 0
+
+print(f"PASS  LLM-enhanced rows         : {len(llm)} / 181")
+print(f"PASS  Non-empty immediate_action : {len(llm) - empty_imm} / {len(llm)}")
+print(f"PASS  Non-empty short_term_fix   : {len(llm) - empty_st} / {len(llm)}")
+print(f"PASS  Non-empty preventive       : {len(llm) - empty_pr} / {len(llm)}")
+```
+
+Expected:
+```
+PASS  LLM-enhanced rows         : 101 / 181
+PASS  Non-empty immediate_action : 101 / 101
+PASS  Non-empty short_term_fix   : 101 / 101
+PASS  Non-empty preventive       : 101 / 101
+```
+
+---
+
+#### Test 11 — Effort Level Values
+
+`effort_level` must only contain H (multi-day cross-team project), M (same-day task), or L (under 1-hour check). No nulls or unexpected values.
+
+```python
+import pandas as pd
+
+df = pd.read_csv("data/intelligence_results.csv")
+
+assert set(df["effort_level"].unique()).issubset({"H", "M", "L"})
+assert df["effort_level"].notna().all()
+
+counts = df["effort_level"].value_counts()
+print(f"PASS  effort_level values: {sorted(df['effort_level'].unique())}  (no unexpected values)")
+for effort in ["H", "M", "L"]:
+    n = counts.get(effort, 0)
+    print(f"  {effort}  {n:>3}  ({n/181*100:.1f}%)")
+```
+
+Expected:
+```
+PASS  effort_level values: ['H', 'L', 'M']  (no unexpected values)
+  H    3  (1.7%)
+  M   60  (33.1%)
+  L  118  (65.2%)
+```
+
+---
+
+#### Test 12 — SQLite Parity (All 14 Tables)
+
+All 14 SQLite tables across Layers 1–4 must be present in `kpi_anomaly_detection.db` with correct row counts.
+
+```python
+import sqlite3
+import pandas as pd
+
+conn = sqlite3.connect("data/kpi_anomaly_detection.db")
+
+expected = {
+    "processed_kpis"        :   731,
+    "method_a_results"      :  8772,
+    "method_b_results"      :   731,
+    "method_c_results"      :  2924,
+    "anomaly_results"       :   181,
+    "ensemble_voting_matrix":  8772,
+    "rca_graph_results"     :   181,
+    "rca_causal_results"    :   181,
+    "rca_results"           :   181,
+    "rca_assembly"          :   181,
+    "impact_results"        :   181,
+    "priority_results"      :   181,
+    "recommendations"       :   181,
+    "intelligence_results"  :   181,
+}
+
+for table, exp_n in expected.items():
+    actual_n = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+    assert actual_n == exp_n, f"{table}: expected {exp_n}, got {actual_n}"
+    print(f"PASS  {table:<30}  {actual_n:>6,} rows")
+
+conn.close()
+```
+
+Expected:
+```
+PASS  processed_kpis                   731 rows
+PASS  method_a_results               8,772 rows
+PASS  method_b_results                 731 rows
+PASS  method_c_results               2,924 rows
+PASS  anomaly_results                  181 rows
+PASS  ensemble_voting_matrix          8,772 rows
+PASS  rca_graph_results                181 rows
+PASS  rca_causal_results               181 rows
+PASS  rca_results                      181 rows
+PASS  rca_assembly                     181 rows
+PASS  impact_results                   181 rows
+PASS  priority_results                 181 rows
+PASS  recommendations                  181 rows
+PASS  intelligence_results             181 rows
+```
+
+---
+
+#### Running all Layer 4 tests
+
+Run `scripts/4_Quality_Tests.ipynb` top-to-bottom with the project root as the working directory. All 12 tests passing confirms the impact quantification, prioritization, recommendation generation, and final assembly completed correctly — and that `intelligence_results.csv` is clean and ready for Layer 5 (Communication Layer).
 
 ---
 
 ## LAYER 5 — Communication Layer
 
-### Step 5.1 — Immediate Alert
+Five scripts run sequentially on `intelligence_results.csv` (181 × 68) and produce all communication artefacts, ending with the Power BI-ready star schema.
 
-Sent within minutes of anomaly confirmation via Email + Slack/Teams webhook:
+| Script | Output | Shape | Key additions |
+|---|---|---|---|
+| `5.1_alert_formatter.py` | `alert_payloads.csv` | 181 × 73 | `alert_subject`, `alert_body`, `audience`, `delivery_channel`, `urgency_label` |
+| `5.2_report_generator.py` | `outputs/reports/` (per-anomaly HTML + 1 daily summary) | — | Structured HTML alerts with recommendations and impact for distribution |
+| `5.3_delivery_simulation.py` | `delivery_log.csv` | 181 × 13 | `recipient`, `message_id`, `sent_at`, `delivery_status`, `delivery_note` |
+| `5.4_communication_assembly.py` | `communication_results.csv` | 181 × 78 | Joins alert_payloads + delivery_log; 12 internal quality assertions before write |
+| `5.5_powerbi_data_prep.py` | `outputs/powerbi/` (5 files) | Various | Star schema: fact_anomalies (181 × 40), dim_kpi, dim_date, summary_kpi_impact, summary_timeline |
 
+---
+
+### Step 5.1 — Alert Formatter
+
+Reads `intelligence_results.csv` and adds 5 columns: `alert_subject`, `alert_body`, `audience`, `delivery_channel`, `urgency_label`.
+
+**Alert subject format:** `[{routing_flag}] {KPI label} {direction} {deviation:+.1f}% — Priority #{rank} | {date}`
+
+**Example subjects by routing flag:**
+- `[ESCALATE]` → `[ESCALATE] Total Revenue (USD) UP +223.8% — Priority #1 | 2024-11-29`
+- `[SUPPRESSED]` → `[SUPPRESSED] Avg. ROAS DOWN -35.2% — External: competitive_pressure | 2024-06-18`
+
+**Alert routing by urgency:**
+
+| Flag | Audience | Channel | Urgency label |
+|---|---|---|---|
+| ESCALATE | Executive, Operations | Slack + Email | Immediate |
+| INVESTIGATE | Operations, Analyst | Email | Daily |
+| MONITOR | Analyst | Digest | Weekly |
+| SUPPRESSED | (audit log only) | None | Suppressed |
+
+Alert bodies for SUPPRESSED anomalies contain "NO ACTION REQUIRED" and explain the external driver so the audit trail is clear.
+
+---
+
+### Step 5.2 — Report Generator
+
+Generates structured HTML alert reports for each anomaly and one daily summary report. Reports are written to `outputs/reports/` and include:
+- KPI value vs forecast with deviation %
+- Root cause narrative (from `rca_narrative`)
+- Business impact statement (from `impact_narrative`)
+- Three-part recommendation (immediate / short-term / preventive) with owner and effort
+- External context if applicable
+
+---
+
+### Step 5.3 — Delivery Simulation
+
+Simulates alert dispatch across the four routing paths, producing `delivery_log.csv` (181 × 13). Each row records `recipient`, `message_id`, `sent_at` timestamp, `delivery_status`, and `delivery_note`. This log is the audit trail for Layer 5 — in production it would be replaced by actual Slack/email delivery confirmations.
+
+---
+
+### Step 5.4 — Communication Assembly
+
+Joins `alert_payloads.csv` (181 × 73) with `delivery_log.csv` (181 × 13) on `anomaly_id`, producing `communication_results.csv` (181 × 78). Runs 12 internal quality assertions before writing — any failure exits without touching the output file.
+
+The 5 delivery columns added from the log: `recipient`, `message_id`, `sent_at`, `delivery_status`, `delivery_note`.
+
+---
+
+### Step 5.5 — Power BI Data Prep
+
+Reshapes `communication_results.csv` into a Power BI star schema — dropping raw detection internals, long-text columns (alert_body, delivery_note), and redundant signals not suited for visual slicing.
+
+**Output files (all written to `outputs/powerbi/`):**
+
+| File | Shape | Description |
+|---|---|---|
+| `fact_anomalies.csv` | 181 × 40 | Main fact table — one row per confirmed anomaly |
+| `dim_kpi.csv` | 12 × 5 | KPI dimension (name, tier, label, direction preference, owner) |
+| `dim_date.csv` | 731 × 13 | Full calendar 2024-01-01 to 2025-12-31 (year, quarter, month, week, day-of-week, holiday flag) |
+| `summary_kpi_impact.csv` | 17 × 7 | KPI × priority_band aggregation — total revenue_at_risk and anomaly count per KPI |
+| `summary_timeline.csv` | 68 × 10 | Daily anomaly timeline — one row per anomaly date with severity mix and aggregate impact |
+
+**Power BI data model relationships:**
 ```
-🚨 [HIGH] Revenue Anomaly Detected — 2024-03-15
-────────────────────────────────────────────────
-KPI:       Total Revenue
-Actual:    $7,821  (-31.4% vs expected $11,400)
-Cause:     ROAS collapse in paid_search channel (confidence: 87%)
-Impact:    $28,400 at risk this week
-Action:    Pause underperforming ad groups → @growth-team
-Dashboard: [Power BI Link]
-```
-
-**Alert routing by severity:**
-
-| Severity | Recipients                          | Channel         | SLA       |
-|----------|-------------------------------------|-----------------|-----------|
-| HIGH     | VP Marketing + Ops Lead + Analytics | Slack + Email   | < 10 min  |
-| MEDIUM   | Analytics team + Channel owner      | Slack           | < 1 hour  |
-| LOW      | Analytics digest                    | Email (daily)   | 24h       |
-
-### Step 5.2 — Executive Summary (auto-generated, daily 8am)
-
-```
-DAILY KPI INTELLIGENCE BRIEF — [Date]
-═══════════════════════════════════════
-HEADLINE: [One sentence — business state today]
-
-ANOMALIES DETECTED: [N]
-  ▸ HIGH (N):   [brief list]
-  ▸ MEDIUM (N): [brief list]
-
-FINANCIAL EXPOSURE: $XXX,XXX at risk
-
-TOP PRIORITY ACTION:
-  → [Single most important action | owner | timeline]
-
-TRENDING CONCERNS:
-  → [2–3 emerging patterns not yet at anomaly threshold]
-
-WHAT IS PERFORMING WELL:
-  → [1–2 positive callouts to balance narrative]
-
-FULL DETAILS: [Power BI dashboard link]
-```
-
-### Step 5.3 — Power BI Dashboard
-
-Power BI connects via DirectQuery or scheduled CSV refresh to the agent's processed output.
-
-```
-┌──────────────────────────────────────────────────────┐
-│  ANOMALY DETECTION DASHBOARD                         │
-│                                                      │
-│  Page 1: Command Center                              │
-│  ├── KPI scorecards with anomaly colour coding       │
-│  ├── Anomaly timeline (date × severity heatmap)      │
-│  └── Active anomalies table with priority rank       │
-│                                                      │
-│  Page 2: Root Cause Explorer                         │
-│  ├── Driver decomposition waterfall chart            │
-│  ├── KPI × KPI correlation matrix                    │
-│  └── External factor overlay (economic/seasonal)     │
-│                                                      │
-│  Page 3: Impact & Recommendations                    │
-│  ├── Revenue at risk gauge                           │
-│  ├── Recommendation cards (immediate / short / preventive) │
-│  └── Recovery tracking (did last recommendation work?)│
-│                                                      │
-│  Page 4: Executive Summary                           │
-│  └── Auto-text narrative (Claude-written brief)      │
-└──────────────────────────────────────────────────────┘
+fact_anomalies[date] → dim_date[date]   (many-to-one)
+fact_anomalies[kpi]  → dim_kpi[kpi]    (many-to-one)
 ```
 
 **Conditional formatting DAX for anomaly colour coding:**
@@ -1665,7 +2122,7 @@ RETURN
 
 ---
 
-## Step 5.7 — Layer 5 Quality Tests
+## Step 5.6 — Layer 5 Quality Tests
 
 Run these checks after executing all five Layer 5 scripts (`5.1_alert_formatter.py`, `5.2_report_generator.py`, `5.3_delivery_simulation.py`, `5.4_communication_assembly.py`, `5.5_powerbi_data_prep.py`) to confirm the Communication Layer produced valid output. All inputs (`alert_payloads.csv`, `delivery_log.csv`, `communication_results.csv`, `outputs/reports/`, `outputs/powerbi/`) must exist before running.
 
@@ -2160,73 +2617,484 @@ Copy any of the checks above into a Python session or open `scripts/5_Quality_Te
 
 ## LAYER 6 — Agent Orchestration
 
-### Step 6.1 — Agent Architecture
+Three scripts implement the agent layer. `6.1_agent_tools.py` defines the 9 tools and their Anthropic schemas. `6.2_agent_orchestrator.py` runs the Claude tool-use loop. `6.3_agent_runner.py` is the CLI entry point with date selection and scheduling.
 
-```
-┌─────────────────────────────────────────────────────┐
-│              ORCHESTRATOR AGENT (LLM)               │
-│                  claude-sonnet-4-6                  │
-└──────────────────────┬──────────────────────────────┘
-                       │ Tools:
-          ┌────────────┼─────────────────────┐
-          ↓            ↓                     ↓
-  [run_detection]  [run_rca]           [generate_summary]
-  [fetch_kpis]     [lookup_playbook]   [send_alert]
-  [score_impact]   [causal_inference]  [update_powerbi]
-```
+| Script | Role | Key outputs |
+|---|---|---|
+| `6.1_agent_tools.py` | Tool implementations + TOOL_DEFINITIONS + dispatch_tool() | Tool function library; no file output on its own |
+| `6.2_agent_orchestrator.py` | KPIAnomalyOrchestrator class; tool-use loop; run log writer | `data/agent_run_log.json`, `outputs/executive_summary_{date}.txt`, `data/agent_results.csv` |
+| `6.3_agent_runner.py` | CLI entry point; date selection; daily scheduler | Invokes orchestrator; prints run report |
 
-The agent holds a system prompt encoding KPI definitions, business rules, alert routing, dependency graphs, and the playbook index. It decides which tools to call, and in what order, based on what it detects.
+---
 
-### Step 6.2 — Agent Decision Flow (daily run)
+### Step 6.1 — Agent Tools
 
-```
-START (triggered at 7:00am or on new data arrival)
-  │
-  ├─ Step 1: fetch_kpis(date=today)
-  │           → Returns latest daily row from master_dataset
-  │
-  ├─ Step 2: run_detection(kpis, methods=['statistical','prophet','isolation_forest'])
-  │           → Returns list of AnomalyObjects with severity scores
-  │
-  ├─ IF anomalies found:
-  │   │
-  │   ├─ Step 3: run_rca(anomaly)  [for each HIGH / MEDIUM anomaly]
-  │   │           → Traverses dependency graph + runs CausalImpact
-  │   │           → Returns RootCauseObject with confidence %
-  │   │
-  │   ├─ Step 4: score_impact(anomaly, root_cause)
-  │   │           → Returns ImpactObject (revenue_at_risk, margin, customers)
-  │   │
-  │   ├─ Step 5: prioritize(all_anomalies)
-  │   │           → Returns anomalies sorted by composite priority score
-  │   │
-  │   ├─ Step 6: generate_recommendations(anomaly, root_cause, impact)
-  │   │           → Playbook lookup → Claude LLM enhancement
-  │   │
-  │   └─ Step 7: send_alert(severity=HIGH)
-  │               → Routes to correct channel and recipients
-  │
-  ├─ Step 8: generate_executive_summary(all_anomalies, date)
-  │           → Claude writes the daily brief
-  │
-  └─ Step 9: update_powerbi_dataset()
-              → Writes anomaly_results.csv → Power BI refreshes
+Nine Python functions that the orchestrator calls via Anthropic `tool_use`. Each tool **reads from pre-computed Layer 1–5 CSVs** — they do not re-run detection or causal inference pipelines. NaN values are sanitised to `None` before serialisation so every tool returns valid JSON.
+
+| Tool | Input | Data source | Returns |
+|---|---|---|---|
+| `fetch_kpis` | `date` | `master_dataset.csv` | Full 33-column daily KPI row |
+| `run_detection` | `date` | `anomaly_results.csv` | List of anomalies with severity, votes, methods_flagged |
+| `run_rca` | `anomaly_id` | `rca_results.csv` | dependency_chain, suspected_driver_kpi, root_cause_confidence, causal summary, external driver flags |
+| `score_impact` | `anomaly_id` | `impact_results.csv` | revenue_at_risk, margin_impact, customer_impact, monthly_shortfall, impact_narrative |
+| `prioritize` | `date` | `priority_results.csv` | All anomalies for the date sorted by priority_rank |
+| `lookup_playbook` | `anomaly_id` | `recommendations.csv` | immediate_action, short_term_fix, preventive_measure, recommended_owner, effort_level |
+| `send_alert` | `anomaly_id` | `delivery_log.csv` | delivery_channel, delivery_status, recipient, message_id |
+| `generate_executive_summary` | `date`, `summary_text` | (write) | Saves text to `outputs/executive_summary_{date}.txt`; returns word_count |
+| `update_powerbi_dataset` | `date` | `communication_results.csv` | Appends/replaces rows for date in `agent_results.csv`; returns rows_written |
+
+**Tool dispatch pattern:**
+
+```python
+def dispatch_tool(tool_name: str, tool_input: dict) -> str:
+    """Execute a tool by name and return its result as a JSON string."""
+    result = TOOL_DISPATCH[tool_name](**tool_input)
+    return json.dumps(result, default=str)
+
+# TOOL_DEFINITIONS is the list of Anthropic tool schemas passed to messages.create()
+# Each schema includes name, description, and input_schema (JSON Schema object)
 ```
 
-### Step 6.3 — Technology Stack
+**Import pattern:** Because filenames start with digits (`6.1_`, `6.2_`), standard `import` fails. Both `6.2` and `6.3` use `importlib.util.spec_from_file_location()` to load the module by file path.
 
-| Component            | Technology                              | Purpose                              |
-|----------------------|-----------------------------------------|--------------------------------------|
-| Data store           | SQLite (dev) / PostgreSQL / Azure SQL   | SQL backend Power BI reads from      |
-| Feature engineering  | Python: `pandas`, `statsmodels`         | Rolling stats, z-scores, lag features|
-| Statistical detection| `scipy`, `statsmodels` STL              | Fast, interpretable baseline         |
-| ML detection         | `scikit-learn` IsolationForest          | Unsupervised multi-KPI detection     |
-| Forecasting          | `prophet`                               | Handles seasonality + regressors     |
-| Causal inference     | `causalimpact`, `dowhy`                 | Confidence-scored root cause         |
-| Agent LLM            | Claude API (`claude-sonnet-4-6`)        | Orchestration + NL generation        |
-| Alerts               | `smtplib` + Slack/Teams webhooks        | Multi-channel alert delivery         |
-| Visualization        | Power BI Desktop + Service              | Executive dashboard                  |
-| Scheduler            | Python `schedule` or GitHub Actions     | Daily pipeline trigger               |
+---
+
+### Step 6.2 — Agent Orchestrator
+
+**Model:** `claude-sonnet-4-6` · **max_tokens:** 8096 · **MAX_TURNS:** 60 (safety limit)
+
+**`KPIAnomalyOrchestrator.run(date)`** drives a standard Anthropic tool-use loop:
+1. Send the initial user message: `"Run the daily KPI anomaly detection and analysis pipeline for {date}. Follow the 9-step decision flow exactly."`
+2. On each turn: call `messages.create()` with the system prompt, 9 tool definitions, and full conversation history
+3. If `stop_reason == "tool_use"`: dispatch each tool block via `dispatch_tool()`, append results as `tool_result` blocks, continue
+4. If `stop_reason == "end_turn"`: pipeline complete — break
+
+Every tool call is recorded in `self.tool_trace` with step number, tool name, `tool_use_id`, input, and output. At the end the full trace is written to `data/agent_run_log.json`.
+
+**System prompt structure (7 sections):**
+
+| Section | Content |
+|---|---|
+| Decision Flow | Exact 9-step sequence the agent must follow every run |
+| KPI Taxonomy | Tier 1/2/3 KPI lists, detection thresholds, SLAs |
+| Dependency Graph | driver → outcome relationships for the agent's reasoning |
+| Severity & Alert Routing | HIGH/MEDIUM/LOW routing rules; suppression triggers |
+| Playbook Owner Reference | playbook_key → responsible team mapping |
+| Executive Summary Format | Required section headings and placeholder schema |
+| Operating Rules | Edge-case handling, error tolerance, ordering constraints |
+
+**9-step decision flow encoded in the system prompt:**
+
+```
+Step 1  FETCH        → fetch_kpis(date)                           [always]
+Step 2  DETECT       → run_detection(date)                         [always; skip 3–7 if count=0]
+Step 3  RCA          → run_rca(anomaly_id)                         [HIGH + MEDIUM only]
+Step 4  IMPACT       → score_impact(anomaly_id)                    [HIGH + MEDIUM only]
+Step 5  PRIORITISE   → prioritize(date)                            [always]
+Step 6  PLAYBOOK     → lookup_playbook(anomaly_id)                 [HIGH + MEDIUM only]
+Step 7  ALERT        → send_alert(anomaly_id)                      [all severities]
+Step 8  SUMMARY      → generate_executive_summary(date, text)      [always; compose first]
+Step 9  POWERBI      → update_powerbi_dataset(date)                [always; absolute last]
+```
+
+**Typical run profile (2024-08-20 — back_to_school_surge, 6 anomalies):**
+
+| Metric | Value |
+|---|---|
+| Agent turns | 7 |
+| Total tool calls | 20 |
+| run_rca calls | 3 (HIGH × 2 + MEDIUM × 1) |
+| score_impact calls | 3 |
+| send_alert calls | 6 (all anomalies) |
+| Executive summary | 789 words |
+| Status | completed |
+
+**Run log schema (`data/agent_run_log.json`):**
+
+```json
+{
+  "date": "2024-08-20",
+  "model": "claude-sonnet-4-6",
+  "status": "completed",
+  "total_turns": 7,
+  "tool_call_count": 20,
+  "tools_used": ["fetch_kpis", "run_detection", "run_rca", "score_impact",
+                 "prioritize", "lookup_playbook", "send_alert",
+                 "generate_executive_summary", "update_powerbi_dataset"],
+  "final_text": "...(agent's full narrative output)...",
+  "tool_trace": [
+    {
+      "step": 1,
+      "tool_name": "fetch_kpis",
+      "tool_use_id": "toolu_01...",
+      "input": {"date": "2024-08-20"},
+      "output": {"total_revenue_usd": 22652.0, "n_orders": 370, ...}
+    },
+    ...
+  ]
+}
+```
+
+---
+
+### Step 6.3 — Agent Runner (CLI)
+
+Entry point for production use. Three run modes selected via mutually exclusive CLI flags:
+
+| Flag | Behaviour |
+|---|---|
+| `--date YYYY-MM-DD` | Run pipeline for this specific date |
+| `--demo` | Auto-select the date with the most HIGH-severity anomalies in the dataset |
+| `--schedule` | Run immediately, then daily at `--time` (default `07:00`) via `schedule` package |
+| (no flag) | Auto-select the most recent date with any detected anomaly |
+
+**Scheduled runner (`--schedule`):** calls `_scheduled_job()` via `schedule.every().day.at("07:00")`. In production the runner uses today's date if it exists in `master_dataset.csv`; otherwise falls back to the dataset's most recent date — supporting both production and historical demo modes.
+
+**Post-run report printed to stdout:**
+
+```
+======================================================
+  Pipeline Run Report
+======================================================
+  Date              : 2024-08-20
+  Status            : completed
+  Model             : claude-sonnet-4-6
+  Agent turns       : 7
+  Tool calls        : 20
+  Anomalies found   : 6  {'HIGH': 2, 'MEDIUM': 1, 'LOW': 3}
+  Revenue at risk   : $13,061
+  Summary words     : 789
+  Outputs written:
+    data/agent_run_log.json
+    data/agent_results.csv
+    outputs/executive_summary_2024-08-20.txt
+======================================================
+```
+
+---
+
+### Step 6.4 — Technology Stack
+
+| Component | Technology | Purpose |
+|---|---|---|
+| Data store | SQLite (dev) / PostgreSQL / Azure SQL | SQL backend Power BI reads from |
+| Feature engineering | `pandas`, `statsmodels` | Rolling stats, z-scores, lag features |
+| Statistical detection | `statsmodels` STL | Fast, interpretable baseline (Method A) |
+| ML detection | `scikit-learn` IsolationForest | Unsupervised multi-KPI detection (Method B) |
+| Forecasting | `prophet` | Seasonal decomposition + regressors (Method C) |
+| Causal inference | `causalimpact` 0.2.6 (MLE), `dowhy` 0.14 | Confidence-scored root cause quantification |
+| Dependency graph | `networkx` 3.6.1 | DAG traversal for driver drill-down |
+| Agent LLM | Claude API (`claude-sonnet-4-6`) | 9-step orchestration + executive summary |
+| Recommendation LLM | Claude API (`claude-haiku-4-5-20251001`) | Per-anomaly action generation (Layer 4) |
+| Prompt caching | `cache_control: ephemeral` | System prompt cached across 101 Layer 4 calls |
+| Alerts | Delivery simulation (`delivery_log.csv`) | Multi-channel routing log (prod: Slack/Email) |
+| Visualisation | Power BI star schema (`fact_anomalies.csv` + 4 dims) | Executive dashboard |
+| Scheduler | `schedule` Python package | Daily pipeline trigger at 07:00 |
+
+---
+
+## Step 6.5 — Layer 6 Quality Tests
+
+Run these checks after executing `6.3_agent_runner.py` (or `6.2_agent_orchestrator.py` directly). The notebook `scripts/6_Quality_Tests.ipynb` runs all 7 tests end-to-end.
+
+**Prerequisites:** `data/agent_run_log.json`, `data/agent_results.csv`, and `outputs/executive_summary_{date}.txt` must exist. Run `6.3_agent_runner.py` or `6.2_agent_orchestrator.py` first.
+
+---
+
+#### Test 1 — Run Log Exists and Pipeline Completed
+
+The run log must exist, report `status = 'completed'`, contain at least 9 tool calls (one per pipeline step), span at least 2 agent turns, and use `claude-sonnet-4-6`.
+
+```python
+import json
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    log = json.load(f)
+
+assert log["status"] == "completed",         f"Pipeline did not complete: {log['status']}"
+assert log["tool_call_count"] >= 9,          f"Fewer than 9 tool calls: {log['tool_call_count']}"
+assert log["total_turns"] >= 2,              f"Fewer than 2 turns: {log['total_turns']}"
+assert log["model"] == "claude-sonnet-4-6",  f"Unexpected model: {log['model']}"
+
+print(f"PASS  Status      : {log['status']}")
+print(f"PASS  Tool calls  : {log['tool_call_count']} (>= 9)")
+print(f"PASS  Agent turns : {log['total_turns']} (>= 2)")
+print(f"PASS  Model       : {log['model']}")
+```
+
+Expected:
+```
+PASS  Status      : completed
+PASS  Tool calls  : 20 (>= 9)
+PASS  Agent turns : 7 (>= 2)
+PASS  Model       : claude-sonnet-4-6
+```
+
+---
+
+#### Test 2 — All 9 Tool Names Present
+
+Every tool in the defined set must appear at least once in `tools_used`. A missing tool means the agent skipped a pipeline step.
+
+```python
+import json
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    log = json.load(f)
+
+REQUIRED = [
+    "fetch_kpis", "run_detection", "run_rca", "score_impact",
+    "prioritize", "lookup_playbook", "send_alert",
+    "generate_executive_summary", "update_powerbi_dataset",
+]
+
+missing = [t for t in REQUIRED if t not in log["tools_used"]]
+assert len(missing) == 0, f"Tools missing from run: {missing}"
+
+for t in REQUIRED:
+    n = sum(1 for e in log["tool_trace"] if e["tool_name"] == t)
+    print(f"PASS  {t:<40}  {n:>2} call(s)")
+```
+
+Expected:
+```
+PASS  fetch_kpis                                1 call(s)
+PASS  run_detection                             1 call(s)
+PASS  run_rca                                   3 call(s)
+PASS  score_impact                              3 call(s)
+PASS  prioritize                                1 call(s)
+PASS  lookup_playbook                           3 call(s)
+PASS  send_alert                                6 call(s)
+PASS  generate_executive_summary                1 call(s)
+PASS  update_powerbi_dataset                    1 call(s)
+```
+
+---
+
+#### Test 3 — Decision Flow Order Respected
+
+The agent must call tools in the correct causal order. `update_powerbi_dataset` must be the absolute last tool call.
+
+```python
+import json
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    log = json.load(f)
+
+trace = log["tool_trace"]
+
+def first_step(name):
+    steps = [e["step"] for e in trace if e["tool_name"] == name]
+    return min(steps) if steps else float("inf")
+
+ORDER = [
+    ("fetch_kpis",                 "run_detection"),
+    ("run_detection",              "run_rca"),
+    ("run_detection",              "score_impact"),
+    ("prioritize",                 "lookup_playbook"),
+    ("lookup_playbook",            "send_alert"),
+    ("send_alert",                 "generate_executive_summary"),
+    ("generate_executive_summary", "update_powerbi_dataset"),
+]
+
+for earlier, later in ORDER:
+    assert first_step(earlier) < first_step(later), \
+        f"Order violated: {earlier} must precede {later}"
+    print(f"PASS  {earlier:<35} before  {later}")
+
+last_tool = trace[-1]["tool_name"]
+assert last_tool == "update_powerbi_dataset", f"Last tool was {last_tool!r}"
+print(f"\nPASS  update_powerbi_dataset is the final tool call (step {trace[-1]['step']})")
+```
+
+Expected:
+```
+PASS  fetch_kpis                           before  run_detection
+PASS  run_detection                        before  run_rca
+PASS  run_detection                        before  score_impact
+PASS  prioritize                           before  lookup_playbook
+PASS  lookup_playbook                      before  send_alert
+PASS  send_alert                           before  generate_executive_summary
+PASS  generate_executive_summary           before  update_powerbi_dataset
+
+PASS  update_powerbi_dataset is the final tool call (step 20)
+```
+
+---
+
+#### Test 4 — Executive Summary Saved and ≥ 200 Words
+
+The orchestrator must save `outputs/executive_summary_{date}.txt` with at least 200 words and all three required structural sections.
+
+```python
+import json
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    run_date = json.load(f)["date"]
+
+summary_path = Path(f"outputs/executive_summary_{run_date}.txt")
+assert summary_path.exists(), f"Summary not found: {summary_path}"
+
+text       = summary_path.read_text(encoding="utf-8")
+word_count = len(text.split())
+assert word_count >= 200, f"Summary too short: {word_count} words"
+
+for section in ["SITUATION OVERVIEW", "HIGH PRIORITY", "RECOMMENDED IMMEDIATE ACTIONS"]:
+    assert section in text, f"Missing section: {section!r}"
+    print(f"PASS  Section present  : {section!r}")
+
+print(f"PASS  Word count       : {word_count} words (>= 200)")
+```
+
+Expected:
+```
+PASS  Section present  : 'SITUATION OVERVIEW'
+PASS  Section present  : 'HIGH PRIORITY'
+PASS  Section present  : 'RECOMMENDED IMMEDIATE ACTIONS'
+PASS  Word count       : 789 words (>= 200)
+```
+
+---
+
+#### Test 5 — Anomaly Count Matches Layer 2 Ground Truth
+
+The count returned by `run_detection` in the agent trace must exactly match the row count for the same date in `anomaly_results.csv`. A mismatch means the agent read stale or incorrect data.
+
+```python
+import json
+import pandas as pd
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    log = json.load(f)
+
+run_date   = log["date"]
+det        = next(e for e in log["tool_trace"] if e["tool_name"] == "run_detection")
+agent_count = det["output"]["count"]
+
+ar         = pd.read_csv("data/anomaly_results.csv")
+l2_count   = len(ar[ar["date"] == run_date])
+
+assert agent_count == l2_count, f"Count mismatch: agent={agent_count}, Layer 2={l2_count}"
+
+print(f"PASS  Anomaly count    : agent={agent_count}  Layer 2={l2_count}  (exact match)")
+print(f"PASS  Severity summary : {det['output']['severity_summary']}")
+```
+
+Expected:
+```
+PASS  Anomaly count    : agent=6  Layer 2=6  (exact match)
+PASS  Severity summary : {'LOW': 3, 'HIGH': 2, 'MEDIUM': 1}
+```
+
+---
+
+#### Test 6 — Alert Routing Accuracy
+
+For the run date, `delivery_log.csv` must show the correct channel and status per severity tier.
+
+```python
+import json
+import pandas as pd
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    run_date = json.load(f)["date"]
+
+ar = pd.read_csv("data/anomaly_results.csv")[["anomaly_id", "severity"]]
+dl = pd.read_csv("data/delivery_log.csv", parse_dates=["date", "sent_at"])
+merged = dl[dl["date"] == run_date].merge(ar, on="anomaly_id")
+
+ROUTING = {
+    "HIGH":   ("Slack + Email", "SENT"),
+    "MEDIUM": ("Email",         "QUEUED"),
+    "LOW":    ("Digest",        "SCHEDULED"),
+}
+
+for severity, (exp_channel, exp_status) in ROUTING.items():
+    active = merged[
+        (merged["severity"] == severity) & (merged["delivery_status"] != "SUPPRESSED")
+    ]
+    if active.empty:
+        print(f"INFO  {severity}: no unsuppressed anomalies on {run_date}")
+        continue
+    assert (active["delivery_channel"] == exp_channel).all()
+    assert (active["delivery_status"]  == exp_status).all()
+    print(f"PASS  {severity:<8}  ({len(active)} anomaly/ies)  "
+          f"channel={exp_channel:<20}  status={exp_status}")
+
+suppressed = merged[merged["delivery_status"] == "SUPPRESSED"]
+if len(suppressed) > 0:
+    print(f"PASS  {len(suppressed)} suppressed — correctly withheld from executive channel")
+else:
+    print(f"INFO  No suppressed alerts on {run_date}")
+```
+
+Expected (for 2024-08-20 — no suppressed alerts):
+```
+PASS  HIGH      (2 anomaly/ies)  channel=Slack + Email         status=SENT
+PASS  MEDIUM    (1 anomaly/ies)  channel=Email                 status=QUEUED
+PASS  LOW       (3 anomaly/ies)  channel=Digest                status=SCHEDULED
+INFO  No suppressed alerts on 2024-08-20
+```
+
+---
+
+#### Test 7 — Power BI Export Written and Complete
+
+`data/agent_results.csv` must exist, contain rows for the run date, match the detected anomaly count, and include all 10 key downstream columns.
+
+```python
+import json
+import pandas as pd
+from pathlib import Path
+
+with open("data/agent_run_log.json", encoding="utf-8") as f:
+    log = json.load(f)
+
+run_date  = log["date"]
+l2_count  = next(
+    e["output"]["count"] for e in log["tool_trace"]
+    if e["tool_name"] == "run_detection"
+)
+
+ag      = pd.read_csv("data/agent_results.csv")
+ag_date = ag[ag["date"] == run_date]
+
+assert len(ag_date) == l2_count, \
+    f"Row count mismatch: agent_results={len(ag_date)}, detected={l2_count}"
+
+REQUIRED = [
+    "anomaly_id", "date", "kpi", "tier", "severity",
+    "priority_rank", "revenue_at_risk", "delivery_status",
+    "alert_subject", "recommended_owner",
+]
+missing = [c for c in REQUIRED if c not in ag.columns]
+assert len(missing) == 0, f"Missing columns: {missing}"
+
+print(f"PASS  agent_results.csv exists   : data/agent_results.csv")
+print(f"PASS  Rows for {run_date}        : {len(ag_date)}")
+print(f"PASS  Count matches detection    : {len(ag_date)} == {l2_count}")
+print(f"PASS  Required columns present   : {REQUIRED}")
+```
+
+Expected:
+```
+PASS  agent_results.csv exists   : data/agent_results.csv
+PASS  Rows for 2024-08-20        : 6
+PASS  Count matches detection    : 6 == 6
+PASS  Required columns present   : ['anomaly_id', 'date', 'kpi', 'tier', 'severity', ...]
+```
+
+---
+
+#### Running all Layer 6 tests
+
+Run `scripts/6_Quality_Tests.ipynb` top-to-bottom after executing `6.3_agent_runner.py`. All 7 tests passing confirms the orchestrator completed all 9 pipeline steps in the correct order, the executive summary was saved, anomaly counts match Layer 2, alert routing is correct, and `agent_results.csv` is ready for Power BI consumption.
 
 ---
 
