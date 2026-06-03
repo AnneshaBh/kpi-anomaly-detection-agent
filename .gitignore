@@ -2,6 +2,9 @@
 Annesha_Mentorship_Plan.xlsx
 ecommerce_dataset_1year_10000_customers.xlsx
 
+# Power BI build guide (local reference only)
+powerbibuild.md
+
 # Claude Code assistant internals
 .claude/
 
