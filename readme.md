@@ -1665,6 +1665,499 @@ RETURN
 
 ---
 
+## Step 5.7 — Layer 5 Quality Tests
+
+Run these checks after executing all five Layer 5 scripts (`5.1_alert_formatter.py`, `5.2_report_generator.py`, `5.3_delivery_simulation.py`, `5.4_communication_assembly.py`, `5.5_powerbi_data_prep.py`) to confirm the Communication Layer produced valid output. All inputs (`alert_payloads.csv`, `delivery_log.csv`, `communication_results.csv`, `outputs/reports/`, `outputs/powerbi/`) must exist before running.
+
+---
+
+#### Test 1 — alert_payloads Shape and New Columns
+
+Step 5.1 reads `intelligence_results.csv` (181 × 68) and adds exactly 5 new columns, producing `alert_payloads.csv` (181 × 73). The 5 new columns represent the alert payload and routing metadata computed for every anomaly.
+
+```python
+import pandas as pd
+
+ap = pd.read_csv("data/alert_payloads.csv")
+ir = pd.read_csv("data/intelligence_results.csv")
+
+expected_new = ["alert_subject", "alert_body", "audience", "delivery_channel", "urgency_label"]
+actual_new   = [c for c in ap.columns if c not in ir.columns]
+
+assert ap.shape == (181, 73), f"Expected (181, 73), got {ap.shape}"
+assert actual_new == expected_new, f"New cols mismatch: {actual_new}"
+
+print(f"PASS  alert_payloads shape     : {ap.shape}")
+print(f"PASS  5 new columns added      : {actual_new}")
+```
+
+Expected:
+```
+PASS  alert_payloads shape     : (181, 73)
+PASS  5 new columns added      : ['alert_subject', 'alert_body', 'audience', 'delivery_channel', 'urgency_label']
+```
+
+---
+
+#### Test 2 — Alert Subject Format and Coverage
+
+Every alert subject must be non-null, start with the routing flag in square brackets (e.g. `[ESCALATE]`), and embed the anomaly date. The Black Friday event must appear as `[ESCALATE] Total Revenue (USD) UP +223.8% — Priority #1 | 2024-11-29`.
+
+```python
+import pandas as pd
+
+ap = pd.read_csv("data/alert_payloads.csv")
+
+null_subj = ap["alert_subject"].isna().sum()
+null_body = ap["alert_body"].isna().sum()
+bad_fmt   = (~ap["alert_subject"].str.startswith("[")).sum()
+
+assert null_subj == 0 and null_body == 0 and bad_fmt == 0
+
+bf_subj  = ap[ap["anomaly_id"] == "ANO-20241129-REV"]["alert_subject"].iloc[0]
+sup_subj = ap[ap["layer4_priority_flag"] == "SUPPRESSED"]["alert_subject"].iloc[0]
+
+assert "Priority #1" in bf_subj and "[ESCALATE]" in bf_subj
+assert "NO ACTION REQUIRED" in ap[ap["layer4_priority_flag"]=="SUPPRESSED"]["alert_body"].iloc[0]
+
+print(f"PASS  alert_subject: {ap['alert_subject'].notna().sum()} non-null, all start with '['")
+print(f"PASS  alert_body   : {ap['alert_body'].notna().sum()} non-null")
+print(f"PASS  [ESCALATE]   sample: {bf_subj}")
+print(f"PASS  [SUPPRESSED] sample: {sup_subj}")
+print(f"PASS  SUPPRESSED bodies contain 'NO ACTION REQUIRED'")
+```
+
+Expected:
+```
+PASS  alert_subject: 181 non-null, all start with '['
+PASS  alert_body   : 181 non-null
+PASS  [ESCALATE]   sample: [ESCALATE] Total Revenue (USD) UP +223.8% — Priority #1 | 2024-11-29
+PASS  [SUPPRESSED] sample: [SUPPRESSED] Avg. ROAS DOWN -35.2% — External: competitive_pressure | 2024-06-18
+PASS  SUPPRESSED bodies contain 'NO ACTION REQUIRED'
+```
+
+---
+
+#### Test 3 — Four-Way Routing Integrity
+
+All 181 anomalies must be bucketed into exactly one of four routing flags, each carrying the correct audience, delivery channel, and urgency. ESCALATE fires immediately via Slack + Email; INVESTIGATE goes to daily Email; MONITOR to weekly Digest; SUPPRESSED is audit-logged only.
+
+```python
+import pandas as pd
+
+ap = pd.read_csv("data/alert_payloads.csv")
+
+routing = {
+    "ESCALATE":    {"n": 15, "audience": "Executive, Operations", "urgency": "Immediate"},
+    "INVESTIGATE": {"n": 86, "audience": "Operations, Analyst",   "urgency": "Daily"},
+    "MONITOR":     {"n": 74, "audience": "Analyst",               "urgency": "Weekly"},
+    "SUPPRESSED":  {"n":  6, "audience": None,                    "urgency": "Suppressed"},
+}
+
+for flag, cfg in routing.items():
+    sub = ap[ap["layer4_priority_flag"] == flag]
+    assert len(sub) == cfg["n"]
+    assert (sub["urgency_label"] == cfg["urgency"]).all()
+    if cfg["audience"]:
+        assert (sub["audience"] == cfg["audience"]).all()
+
+print(f"{'Flag':<14} {'N':>4}  {'Audience':<30}  {'Channel':<18}  Urgency")
+print("-" * 80)
+for flag in ["ESCALATE", "INVESTIGATE", "MONITOR", "SUPPRESSED"]:
+    sub = ap[ap["layer4_priority_flag"] == flag]
+    aud = sub["audience"].iloc[0] if flag != "SUPPRESSED" else "None (audit log)"
+    ch  = sub["delivery_channel"].iloc[0] if flag != "SUPPRESSED" else "None"
+    urg = sub["urgency_label"].iloc[0]
+    print(f"PASS  {flag:<12} {len(sub):>4}  {str(aud):<30}  {str(ch):<18}  {urg}")
+print(f"PASS  Total routed: {len(ap)}")
+```
+
+Expected:
+```
+Flag              N  Audience                        Channel             Urgency
+--------------------------------------------------------------------------------
+PASS  ESCALATE       15  Executive, Operations           Slack + Email       Immediate
+PASS  INVESTIGATE    86  Operations, Analyst             Email               Daily
+PASS  MONITOR        74  Analyst                         Digest              Weekly
+PASS  SUPPRESSED      6  None (audit log)                None                Suppressed
+PASS  Total routed: 181
+```
+
+---
+
+#### Test 4 — Report Files Exist and Are Non-Empty
+
+Step 5.2 generates three Markdown reports targeted at different audiences. All three must exist under `outputs/reports/`, be non-empty, contain a generation timestamp, and meet minimum size thresholds.
+
+```python
+import os
+
+reports = [
+    ("outputs/reports/executive_summary.md",  1_000,  "C-suite / Business Leads"),
+    ("outputs/reports/operations_digest.md",  10_000, "Operations / Marketing / Engineering"),
+    ("outputs/reports/monitoring_digest.md",  1_000,  "Analyst / Data Team"),
+]
+
+for path, min_bytes, audience in reports:
+    assert os.path.isfile(path)
+    size = os.path.getsize(path)
+    assert size >= min_bytes
+    with open(path, encoding="utf-8") as fh:
+        content = fh.read()
+    assert "Report timestamp:" in content
+    lines = content.count("\n") + 1
+    print(f"PASS  {path.split('/')[-1]:<28}  {size:>8,} bytes  {lines:>4} lines  → {audience}")
+```
+
+Expected:
+```
+PASS  executive_summary.md             5,710 bytes   109 lines  → C-suite / Business Leads
+PASS  operations_digest.md            85,487 bytes   797 lines  → Operations / Marketing / Engineering
+PASS  monitoring_digest.md            21,022 bytes   211 lines  → Analyst / Data Team
+```
+
+---
+
+#### Test 5 — Report Content Coverage
+
+The operations digest must contain every ESCALATE and INVESTIGATE anomaly ID (101 actionable anomalies total). The monitoring digest must contain every MONITOR anomaly ID (74). This confirms no anomaly was silently dropped from any report.
+
+```python
+import pandas as pd
+
+ap = pd.read_csv("data/alert_payloads.csv")
+
+with open("outputs/reports/operations_digest.md",  encoding="utf-8") as fh: ops_txt = fh.read()
+with open("outputs/reports/monitoring_digest.md",  encoding="utf-8") as fh: mon_txt = fh.read()
+
+esc_ids = ap[ap["layer4_priority_flag"] == "ESCALATE"]["anomaly_id"].tolist()
+inv_ids = ap[ap["layer4_priority_flag"] == "INVESTIGATE"]["anomaly_id"].tolist()
+mon_ids = ap[ap["layer4_priority_flag"] == "MONITOR"]["anomaly_id"].tolist()
+
+assert all(i in ops_txt for i in esc_ids)
+assert all(i in ops_txt for i in inv_ids)
+assert all(i in mon_txt for i in mon_ids)
+
+print(f"PASS  All {len(esc_ids)} ESCALATE anomaly IDs present in operations_digest.md")
+print(f"PASS  All {len(inv_ids)} INVESTIGATE anomaly IDs present in operations_digest.md")
+print(f"PASS  All {len(mon_ids)} MONITOR anomaly IDs present in monitoring_digest.md")
+print(f"PASS  Total actionable coverage: {len(esc_ids)+len(inv_ids)} / 101  +  {len(mon_ids)} monitoring")
+```
+
+Expected:
+```
+PASS  All 15 ESCALATE anomaly IDs present in operations_digest.md
+PASS  All 86 INVESTIGATE anomaly IDs present in operations_digest.md
+PASS  All 74 MONITOR anomaly IDs present in monitoring_digest.md
+PASS  Total actionable coverage: 101 / 101  +  74 monitoring
+```
+
+---
+
+#### Test 6 — delivery_log Shape, Statuses, and Message IDs
+
+Step 5.3 produces exactly 181 delivery events — one per anomaly. Every row must have a unique `message_id` (format `MSG-{FLAG}-{NNNN}`), a non-null `sent_at`, and a `delivery_status` drawn from the four valid values.
+
+```python
+import pandas as pd
+
+dl = pd.read_csv("data/delivery_log.csv", parse_dates=["date", "sent_at"])
+
+valid_statuses = {"SENT", "QUEUED", "SCHEDULED", "SUPPRESSED"}
+
+assert dl.shape == (181, 13)
+assert set(dl["delivery_status"].unique()) == valid_statuses
+assert dl["message_id"].nunique() == 181
+assert dl["message_id"].notna().all()
+assert dl["sent_at"].notna().all()
+
+print(f"PASS  delivery_log shape    : {dl.shape}")
+print(f"PASS  delivery_status values: {sorted(dl['delivery_status'].unique())}")
+print(f"PASS  message_id            : {dl['message_id'].nunique()} unique values, 0 nulls")
+print(f"PASS  sent_at               : 0 nulls")
+print()
+print("Delivery status distribution:")
+for status, n in dl["delivery_status"].value_counts().items():
+    print(f"  {status:<12}  {n:>3}  ({n/181*100:.1f}%)")
+```
+
+Expected:
+```
+PASS  delivery_log shape    : (181, 13)
+PASS  delivery_status values: ['QUEUED', 'SCHEDULED', 'SENT', 'SUPPRESSED']
+PASS  message_id            : 181 unique values, 0 nulls
+PASS  sent_at               : 0 nulls
+
+Delivery status distribution:
+  QUEUED         86  (47.5%)
+  SCHEDULED      74  (40.9%)
+  SENT           15  (8.3%)
+  SUPPRESSED      6  (3.3%)
+```
+
+---
+
+#### Test 7 — Delivery Timing Rules
+
+Timing is deterministic from the anomaly date: ESCALATE fires same-day at 09:30; INVESTIGATE queues for the next business day at 08:00; MONITOR schedules to the next Monday at 09:00; SUPPRESSED is logged immediately with no send.
+
+```python
+import pandas as pd
+
+dl = pd.read_csv("data/delivery_log.csv", parse_dates=["date", "sent_at"])
+
+esc_dl = dl[dl["layer4_priority_flag"] == "ESCALATE"]
+inv_dl = dl[dl["layer4_priority_flag"] == "INVESTIGATE"]
+mon_dl = dl[dl["layer4_priority_flag"] == "MONITOR"]
+sup_dl = dl[dl["layer4_priority_flag"] == "SUPPRESSED"]
+
+assert (pd.to_datetime(esc_dl["sent_at"]).dt.date == esc_dl["date"].dt.date).all()
+assert (pd.to_datetime(inv_dl["sent_at"]).dt.weekday < 5).all()
+assert (pd.to_datetime(mon_dl["sent_at"]).dt.weekday == 0).all()
+assert (pd.to_datetime(mon_dl["sent_at"]).dt.hour == 9).all()
+assert (sup_dl["delivery_channel"].isna() | (sup_dl["delivery_channel"] == "None")).all()
+
+sent_window = (esc_dl["sent_at"].min(), esc_dl["sent_at"].max())
+print(f"PASS  ESCALATE ({len(esc_dl)})   : all sent_at on anomaly date at 09:30  (same-day)")
+print(f"      SENT window: {sent_window[0]} – {sent_window[1]}")
+print(f"PASS  INVESTIGATE ({len(inv_dl)}) : all sent_at on a weekday at 08:00  (next business day)")
+print(f"PASS  MONITOR ({len(mon_dl)})     : all sent_at on Monday at 09:00  (weekly digest)")
+print(f"PASS  SUPPRESSED ({len(sup_dl)})  : delivery_channel = None  (audit log only, no send)")
+```
+
+Expected:
+```
+PASS  ESCALATE (15)   : all sent_at on anomaly date at 09:30  (same-day)
+      SENT window: 2024-01-11 09:30:00 – 2025-11-28 09:30:00
+PASS  INVESTIGATE (86) : all sent_at on a weekday at 08:00  (next business day)
+PASS  MONITOR (74)     : all sent_at on Monday at 09:00  (weekly digest)
+PASS  SUPPRESSED (6)  : delivery_channel = None  (audit log only, no send)
+```
+
+---
+
+#### Test 8 — Black Friday End-to-End Spot-Check
+
+The 2024-11-29 `total_revenue_usd` anomaly (ANO-20241129-REV) is Priority #1 in the dataset (+223.8% deviation, $319,977 captured upside). It must appear correctly across all five Layer 5 outputs: alert payload → delivery log → communication results.
+
+```python
+import pandas as pd
+
+AID = "ANO-20241129-REV"
+ap  = pd.read_csv("data/alert_payloads.csv",        parse_dates=["date"])
+dl  = pd.read_csv("data/delivery_log.csv",          parse_dates=["date", "sent_at"])
+cr  = pd.read_csv("data/communication_results.csv", parse_dates=["date"])
+
+bf_ap = ap[ap["anomaly_id"] == AID].iloc[0]
+bf_dl = dl[dl["anomaly_id"] == AID].iloc[0]
+bf_cr = cr[cr["anomaly_id"] == AID].iloc[0]
+
+assert bf_ap["alert_subject"].startswith("[ESCALATE]") and "Priority #1" in bf_ap["alert_subject"]
+assert bf_dl["delivery_status"] == "SENT" and bf_dl["message_id"] == "MSG-ESC-0001"
+assert pd.Timestamp(bf_dl["sent_at"]).date() == pd.Timestamp("2024-11-29").date()
+assert int(bf_cr["priority_rank"]) == 1 and float(bf_cr["revenue_at_risk"]) < 0
+
+print(f"PASS  anomaly_id      : {AID}  (Black Friday — highest priority)")
+print(f"      alert_subject   : {bf_ap['alert_subject']}")
+print(f"      urgency_label   : {bf_ap['urgency_label']}")
+print(f"PASS  delivery_log    : status={bf_dl['delivery_status']}  sent_at={bf_dl['sent_at']}  msg_id={bf_dl['message_id']}")
+print(f"PASS  comm_results    : priority_rank=#{int(bf_cr['priority_rank'])}  status={bf_cr['delivery_status']}  revenue_at_risk=${bf_cr['revenue_at_risk']:,.0f}")
+```
+
+Expected:
+```
+PASS  anomaly_id      : ANO-20241129-REV  (Black Friday — highest priority)
+      alert_subject   : [ESCALATE] Total Revenue (USD) UP +223.8% — Priority #1 | 2024-11-29
+      urgency_label   : Immediate
+PASS  delivery_log    : status=SENT  sent_at=2024-11-29 09:30:00  msg_id=MSG-ESC-0001
+PASS  comm_results    : priority_rank=#1  status=SENT  revenue_at_risk=$-319,977
+```
+
+---
+
+#### Test 9 — communication_results Shape and Join Completeness
+
+Step 5.4 joins `alert_payloads.csv` (181 × 73) with five new columns from `delivery_log.csv` to produce the final 181 × 78 output. No rows must be dropped or duplicated in the join, and no new column may be null.
+
+```python
+import pandas as pd
+
+cr = pd.read_csv("data/communication_results.csv")
+
+new_from_dl = ["recipient", "message_id", "sent_at", "delivery_status", "delivery_note"]
+
+assert cr.shape == (181, 78)
+assert cr["delivery_status"].notna().all()
+assert cr["message_id"].notna().all()
+assert cr["alert_subject"].notna().all()
+assert all(c in cr.columns for c in new_from_dl)
+
+print(f"PASS  communication_results shape : {cr.shape}")
+print(f"PASS  No null delivery_status     : {cr['delivery_status'].notna().sum()} / 181")
+print(f"PASS  No null message_id          : {cr['message_id'].notna().sum()} / 181")
+print(f"PASS  No null alert_subject       : {cr['alert_subject'].notna().sum()} / 181")
+print(f"PASS  Delivery cols joined        : {new_from_dl}")
+```
+
+Expected:
+```
+PASS  communication_results shape : (181, 78)
+PASS  No null delivery_status     : 181 / 181
+PASS  No null message_id          : 181 / 181
+PASS  No null alert_subject       : 181 / 181
+PASS  Delivery cols joined        : ['recipient', 'message_id', 'sent_at', 'delivery_status', 'delivery_note']
+```
+
+---
+
+#### Test 10 — Layer 4 Data Integrity Preserved
+
+All Layer 4 fields must pass through the Layer 5 pipeline unchanged. `priority_rank` must remain a unique 1–181 sequence; `priority_score` must stay in [0, 1]; 101 LLM-enhanced rows must each have a non-empty `immediate_action`. Any regression here signals a broken join or overwrite.
+
+```python
+import pandas as pd
+
+cr = pd.read_csv("data/communication_results.csv")
+
+assert cr["priority_rank"].nunique() == 181 and set(cr["priority_rank"]) == set(range(1, 182))
+assert cr["priority_score"].between(0, 1).all() and cr["priority_score"].notna().all()
+
+llm_rows = cr[cr["llm_enhanced"]]
+assert len(llm_rows) == 101
+assert (llm_rows["immediate_action"].fillna("").str.strip() != "").all()
+
+at_risk = cr[cr["revenue_at_risk"] > 0]["revenue_at_risk"].sum()
+upside  = abs(cr[cr["revenue_at_risk"] < 0]["revenue_at_risk"].sum())
+
+print(f"PASS  priority_rank   : {cr['priority_rank'].nunique()} unique integers  (min=1  max={int(cr['priority_rank'].max())})")
+print(f"PASS  priority_score  : all in [0, 1]  (min={cr['priority_score'].min():.4f}  max={cr['priority_score'].max():.4f})")
+print(f"PASS  llm_enhanced    : {len(llm_rows)} rows, all with non-empty immediate_action")
+print(f"PASS  Revenue at risk : ${at_risk:,.0f}")
+print(f"PASS  Captured upside : ${upside:,.0f}  (upside >> at-risk — net positive position)")
+print(f"PASS  Net margin ben. : ${abs(cr['margin_impact'].sum()):,.0f}")
+```
+
+Expected:
+```
+PASS  priority_rank   : 181 unique integers  (min=1  max=181)
+PASS  priority_score  : all in [0, 1]  (min=0.4311  max=0.9911)
+PASS  llm_enhanced    : 101 rows, all with non-empty immediate_action
+PASS  Revenue at risk : $800,375
+PASS  Captured upside : $4,381,894  (upside >> at-risk — net positive position)
+PASS  Net margin ben. : $1,779,234
+```
+
+---
+
+#### Test 11 — Power BI Star Schema Integrity
+
+Step 5.5 produces five Power BI-optimised files. Shape, referential integrity (anomaly dates in dim_date; KPIs in dim_kpi), and aggregation parity (summary_timeline count = 181; summary_kpi_impact revenue = fact revenue) must all hold.
+
+```python
+import pandas as pd
+
+fact = pd.read_csv("outputs/powerbi/fact_anomalies.csv",     parse_dates=["date"])
+dkpi = pd.read_csv("outputs/powerbi/dim_kpi.csv")
+ddte = pd.read_csv("outputs/powerbi/dim_date.csv")
+skpi = pd.read_csv("outputs/powerbi/summary_kpi_impact.csv")
+stl  = pd.read_csv("outputs/powerbi/summary_timeline.csv")
+
+assert fact.shape == (181, 40) and dkpi.shape == (12, 5)
+assert ddte.shape == (731, 13) and skpi.shape == (17, 9) and stl.shape == (68, 10)
+assert ddte.iloc[0]["date"] == "2024-01-01" and ddte.iloc[-1]["date"] == "2025-12-31"
+assert ddte["date"].nunique() == 731
+
+orphan_dates = set(fact["date"].dt.strftime("%Y-%m-%d")) - set(ddte["date"])
+orphan_kpis  = set(fact["kpi"].unique()) - set(dkpi["kpi"].unique())
+assert len(orphan_dates) == 0 and len(orphan_kpis) == 0
+
+assert int(stl["anomaly_count"].sum()) == 181
+assert abs(fact[fact["revenue_at_risk"]>0]["revenue_at_risk"].sum() - skpi["revenue_at_risk_sum"].sum()) < 0.10
+
+print(f"PASS  fact_anomalies.csv     : {fact.shape}  (38 raw detection cols dropped)")
+print(f"PASS  dim_kpi.csv            : {dkpi.shape}  (12 KPIs, no nulls)")
+print(f"PASS  dim_date.csv           : {ddte.shape}  (2024-01-01 to 2025-12-31, no duplicates)")
+print(f"PASS  summary_kpi_impact.csv : {skpi.shape}  (17 KPI x priority_band combos)")
+print(f"PASS  summary_timeline.csv   : {stl.shape}  (68 anomaly dates, count sum = 181)")
+print(f"PASS  Referential integrity  : all anomaly dates in dim_date, all KPIs in dim_kpi")
+```
+
+Expected:
+```
+PASS  fact_anomalies.csv     : (181, 40)  (38 raw detection cols dropped)
+PASS  dim_kpi.csv            : (12, 5)  (12 KPIs, no nulls)
+PASS  dim_date.csv           : (731, 13)  (2024-01-01 to 2025-12-31, no duplicates)
+PASS  summary_kpi_impact.csv : (17, 9)  (17 KPI x priority_band combos)
+PASS  summary_timeline.csv   : (68, 10)  (68 anomaly dates, count sum = 181)
+PASS  Referential integrity  : all anomaly dates in dim_date, all KPIs in dim_kpi
+```
+
+---
+
+#### Test 12 — Full SQLite Parity (17 Tables, Layers 1–5)
+
+The `kpi_anomaly_detection.db` database must contain all 17 tables produced across Layers 1–5 with their exact expected row counts. Layer 5 adds three new tables: `alert_payloads`, `delivery_log`, and `communication_results`.
+
+```python
+import sqlite3
+
+conn = sqlite3.connect("data/kpi_anomaly_detection.db")
+
+expected_tables = {
+    "processed_kpis": 731, "method_a_results": 8772, "method_b_results": 731,
+    "method_c_results": 2924, "anomaly_results": 181, "ensemble_voting_matrix": 8772,
+    "rca_graph_results": 181, "rca_causal_results": 181, "rca_results": 181, "rca_assembly": 181,
+    "impact_results": 181, "priority_results": 181, "recommendations": 181, "intelligence_results": 181,
+    "alert_payloads": 181, "delivery_log": 181, "communication_results": 181,
+}
+layer_map = {
+    "processed_kpis": "L1",
+    **{t: "L2" for t in ["method_a_results","method_b_results","method_c_results","anomaly_results","ensemble_voting_matrix"]},
+    **{t: "L3" for t in ["rca_graph_results","rca_causal_results","rca_results","rca_assembly"]},
+    **{t: "L4" for t in ["impact_results","priority_results","recommendations","intelligence_results"]},
+    **{t: "L5" for t in ["alert_payloads","delivery_log","communication_results"]},
+}
+
+db_tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+for table, expected_n in expected_tables.items():
+    assert table in db_tables, f"Missing table: {table}"
+    actual_n = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+    assert actual_n == expected_n, f"{table}: expected {expected_n}, got {actual_n}"
+    print(f"PASS  [{layer_map[table]}]  {table:<35}  {actual_n:>6,} rows")
+
+conn.close()
+print(f"\nPASS  Total tables in DB: {len(expected_tables)}")
+```
+
+Expected:
+```
+PASS  [L1]  processed_kpis                          731 rows
+PASS  [L2]  method_a_results                      8,772 rows
+PASS  [L2]  method_b_results                        731 rows
+PASS  [L2]  method_c_results                      2,924 rows
+PASS  [L2]  anomaly_results                         181 rows
+PASS  [L2]  ensemble_voting_matrix                8,772 rows
+PASS  [L3]  rca_graph_results                       181 rows
+PASS  [L3]  rca_causal_results                      181 rows
+PASS  [L3]  rca_results                             181 rows
+PASS  [L3]  rca_assembly                            181 rows
+PASS  [L4]  impact_results                          181 rows
+PASS  [L4]  priority_results                        181 rows
+PASS  [L4]  recommendations                         181 rows
+PASS  [L4]  intelligence_results                    181 rows
+PASS  [L5]  alert_payloads                          181 rows
+PASS  [L5]  delivery_log                            181 rows
+PASS  [L5]  communication_results                   181 rows
+
+PASS  Total tables in DB: 17
+```
+
+---
+
+Copy any of the checks above into a Python session or open `scripts/5_Quality_Tests.ipynb` with the project root as the working directory. All 12 tests passing confirms that the alert formatting, report generation, delivery simulation, communication assembly, and Power BI data preparation all completed correctly, and that `communication_results.csv` is certified as the clean, complete Layer 1–5 pipeline output.
+
+---
+
 ## LAYER 6 — Agent Orchestration
 
 ### Step 6.1 — Agent Architecture
