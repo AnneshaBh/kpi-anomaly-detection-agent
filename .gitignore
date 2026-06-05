@@ -2,11 +2,19 @@
 Annesha_Mentorship_Plan.xlsx
 ecommerce_dataset_1year_10000_customers.xlsx
 
-# Power BI build guide and local HTML artefacts (local reference only)
+# Local reference / build docs
 powerbibuild.md
-infographic_executive.html
-infographic_technical.html
-powerbi_dashboard_mockup.html
+vscode_dashboard_prompt.md
+
+# All HTML output files
+*.html
+
+# Jupyter notebooks and checkpoints
+*.ipynb
+.ipynb_checkpoints/
+
+# Interactive React dashboard (local dev only)
+kpi-anomaly-dashboard/
 
 # Claude Code assistant internals
 .claude/
@@ -19,9 +27,6 @@ __pycache__/
 .venv/
 venv/
 env/
-
-# Jupyter
-.ipynb_checkpoints/
 
 # OS
 .DS_Store
