@@ -13,9 +13,6 @@ vscode_dashboard_prompt.md
 *.ipynb
 .ipynb_checkpoints/
 
-# Interactive React dashboard (local dev only)
-kpi-anomaly-dashboard/
-
 # Claude Code assistant internals
 .claude/
 
