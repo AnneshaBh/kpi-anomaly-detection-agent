@@ -1,0 +1,18 @@
+kpi,kpi_label,priority_band,anomaly_count,revenue_at_risk_sum,upside_sum,net_revenue_impact,avg_priority_score,total_customer_impact
+avg_discount_pct,Avg. Discount %,LOW,3,721.67,0.0,721.67,0.4742,10
+avg_discount_pct,Avg. Discount %,MEDIUM,12,17557.93,0.0,17557.93,0.5336,221
+avg_order_value_usd,Avg. Order Value (USD),HIGH,2,0.0,377123.9,-377123.9,0.7846,4729
+avg_order_value_usd,Avg. Order Value (USD),MEDIUM,3,0.0,57171.3,-57171.3,0.6962,717
+avg_roas,Avg. ROAS,HIGH,57,142118.34,1499074.35,-1356956.01,0.8439,20579
+avg_roas,Avg. ROAS,MEDIUM,5,64118.81,0.0,64118.81,0.6997,804
+bounce_rate,Bounce Rate,MEDIUM,5,17771.21,3544.33,14226.88,0.6788,267
+conversion_rate,Conversion Rate,HIGH,6,0.0,107508.24,-107508.24,0.853,1347
+inventory_health,Inventory Health,MEDIUM,28,56403.49,200178.78,-143775.29,0.5746,3220
+n_orders,Order Volume,HIGH,10,55545.74,162850.0,-107304.26,0.8757,2738
+n_stockouts,Stockout Count,LOW,3,0.0,0.0,0.0,0.45,3
+n_stockouts,Stockout Count,MEDIUM,2,281.17,46.86,234.31,0.5806,5
+return_rate,Return Rate,MEDIUM,4,545.18,260.38,284.8,0.5616,11
+sessions,Website Sessions,MEDIUM,7,46331.01,681036.06,-634705.05,0.6216,9121
+total_clicks,Total Clicks,LOW,1,0.0,130.16,-130.16,0.4691,2
+total_clicks,Total Clicks,MEDIUM,23,368598.91,430149.67,-61550.76,0.6134,10015
+total_revenue_usd,Total Revenue (USD),HIGH,10,30381.61,862820.44,-832438.83,0.9138,11199
