@@ -1,6 +1,6 @@
 {
-  "buildCommand": "cd kpi-anomaly-dashboard && npm install && npm run build",
+  "installCommand": "cd kpi-anomaly-dashboard && npm install",
+  "buildCommand": "cd kpi-anomaly-dashboard && npm run build",
   "outputDirectory": "kpi-anomaly-dashboard/dist",
-  "installCommand": "echo skip",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
