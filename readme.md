@@ -12,7 +12,7 @@ An agent that automatically detects anomalies in primary KPIs, sends immediate a
 │  LAYER 2 │  Anomaly Detection      → Statistical + ML detection         │
 │  LAYER 3 │  Root Cause Analysis    → Causal inference, drill-down       │
 │  LAYER 4 │  Intelligence Engine    → Impact, Prioritization, Actions    │
-│  LAYER 5 │  Communication Layer    → Alerts, Summaries, Power BI        │
+│  LAYER 5 │  Communication Layer    → Alerts, Summaries, Node.js Dashboard│
 │  LAYER 6 │  Agent Orchestration    → LLM brain coordinating all layers  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -36,7 +36,7 @@ The daily backbone is `data/master_dataset.csv` — 33 KPI columns including gro
 
 ### Step 1.2 — Data Ingestion Pipeline
 
-A Python script (`scripts/ingest_and_engineer.py`) runs daily and loads the latest data row into a SQL database that Power BI reads from.
+A Python script (`scripts/ingest_and_engineer.py`) runs daily and loads the latest data row into a SQL database that the React dashboard reads from.
 
 ```
 [master_dataset.csv] ──→ [Python Ingestor] ──→ [SQLite / PostgreSQL / Azure SQL]
@@ -45,7 +45,7 @@ A Python script (`scripts/ingest_and_engineer.py`) runs daily and loads the late
                                ↓
                     [Feature Engineering Module]
                                ↓
-                    [Processed KPI Table]  ←── Power BI reads this
+                    [Processed KPI Table]  ←── React dashboard reads this
 ```
 
 ### Step 1.3 — Feature Engineering
@@ -2025,7 +2025,7 @@ Run `scripts/4_Quality_Tests.ipynb` top-to-bottom with the project root as the w
 
 ## LAYER 5 — Communication Layer
 
-Five scripts run sequentially on `intelligence_results.csv` (181 × 68) and produce all communication artefacts, ending with the Power BI-ready star schema.
+Five scripts run sequentially on `intelligence_results.csv` (181 × 68) and produce all communication artefacts, ending with the dashboard-ready star schema.
 
 | Script | Output | Shape | Key additions |
 |---|---|---|---|
@@ -2033,7 +2033,7 @@ Five scripts run sequentially on `intelligence_results.csv` (181 × 68) and prod
 | `5.2_report_generator.py` | `outputs/reports/` (per-anomaly HTML + 1 daily summary) | — | Structured HTML alerts with recommendations and impact for distribution |
 | `5.3_delivery_simulation.py` | `delivery_log.csv` | 181 × 13 | `recipient`, `message_id`, `sent_at`, `delivery_status`, `delivery_note` |
 | `5.4_communication_assembly.py` | `communication_results.csv` | 181 × 78 | Joins alert_payloads + delivery_log; 12 internal quality assertions before write |
-| `5.5_powerbi_data_prep.py` | `outputs/powerbi/` (5 files) | Various | Star schema: fact_anomalies (181 × 40), dim_kpi, dim_date, summary_kpi_impact, summary_timeline |
+| `5.5_powerbi_data_prep.py` | `PowerBI/data/` (5 files) | Various | Star schema: fact_anomalies (181 × 40), dim_kpi, dim_date, summary_kpi_impact, summary_timeline |
 
 ---
 
@@ -2085,11 +2085,11 @@ The 5 delivery columns added from the log: `recipient`, `message_id`, `sent_at`,
 
 ---
 
-### Step 5.5 — Power BI Data Prep
+### Step 5.5 — Dashboard Data Prep
 
-Reshapes `communication_results.csv` into a Power BI star schema — dropping raw detection internals, long-text columns (alert_body, delivery_note), and redundant signals not suited for visual slicing.
+Reshapes `communication_results.csv` into a star schema for the Node.js React dashboard (`kpi-anomaly-dashboard/`) — dropping raw detection internals, long-text columns (alert_body, delivery_note), and redundant signals not suited for visual slicing.
 
-**Output files (all written to `outputs/powerbi/`):**
+**Output files (all written to `PowerBI/data/`):**
 
 | File | Shape | Description |
 |---|---|---|
@@ -2099,32 +2099,21 @@ Reshapes `communication_results.csv` into a Power BI star schema — dropping ra
 | `summary_kpi_impact.csv` | 17 × 7 | KPI × priority_band aggregation — total revenue_at_risk and anomaly count per KPI |
 | `summary_timeline.csv` | 68 × 10 | Daily anomaly timeline — one row per anomaly date with severity mix and aggregate impact |
 
-**Power BI data model relationships:**
+**Dashboard data model relationships:**
 ```
 fact_anomalies[date] → dim_date[date]   (many-to-one)
 fact_anomalies[kpi]  → dim_kpi[kpi]    (many-to-one)
 ```
 
-**Conditional formatting DAX for anomaly colour coding:**
+**React dashboard usage:**
 
-```dax
-AnomalyColor =
-VAR ZScore = [Revenue_ZScore]
-RETURN
-    SWITCH(
-        TRUE(),
-        ZScore < -2.5, "#FF4444",    -- RED:    anomaly low
-        ZScore >  2.5, "#FF8C00",    -- ORANGE: anomaly high
-        ABS(ZScore) > 1.5, "#FFD700",-- YELLOW: watch zone
-        "#22C55E"                    -- GREEN:  normal
-    )
-```
+Copy the 5 CSV files from `PowerBI/data/` into `kpi-anomaly-dashboard/public/data/` before running the dashboard. The dashboard (`npm run dev` from `kpi-anomaly-dashboard/`) reads them client-side via PapaParse and joins `dim_kpi` onto `fact_anomalies` on the `kpi` column to add labels, tiers, and owners to every fact row. All 5 pages (Executive Overview, Anomaly Timeline, Root Cause Analysis, Business Impact, Recommendations & Actions) react to live filter changes across the shared dataset.
 
 ---
 
 ## Step 5.6 — Layer 5 Quality Tests
 
-Run these checks after executing all five Layer 5 scripts (`5.1_alert_formatter.py`, `5.2_report_generator.py`, `5.3_delivery_simulation.py`, `5.4_communication_assembly.py`, `5.5_powerbi_data_prep.py`) to confirm the Communication Layer produced valid output. All inputs (`alert_payloads.csv`, `delivery_log.csv`, `communication_results.csv`, `outputs/reports/`, `outputs/powerbi/`) must exist before running.
+Run these checks after executing all five Layer 5 scripts (`5.1_alert_formatter.py`, `5.2_report_generator.py`, `5.3_delivery_simulation.py`, `5.4_communication_assembly.py`, `PowerBI/scripts/5.5_powerbi_data_prep.py`) to confirm the Communication Layer produced valid output. All inputs (`alert_payloads.csv`, `delivery_log.csv`, `communication_results.csv`, `outputs/reports/`, `PowerBI/data/`) must exist before running.
 
 ---
 
@@ -2506,18 +2495,18 @@ PASS  Net margin ben. : $1,779,234
 
 ---
 
-#### Test 11 — Power BI Star Schema Integrity
+#### Test 11 — Dashboard Star Schema Integrity
 
-Step 5.5 produces five Power BI-optimised files. Shape, referential integrity (anomaly dates in dim_date; KPIs in dim_kpi), and aggregation parity (summary_timeline count = 181; summary_kpi_impact revenue = fact revenue) must all hold.
+Step 5.5 produces five dashboard-ready files. Shape, referential integrity (anomaly dates in dim_date; KPIs in dim_kpi), and aggregation parity (summary_timeline count = 181; summary_kpi_impact revenue = fact revenue) must all hold.
 
 ```python
 import pandas as pd
 
-fact = pd.read_csv("outputs/powerbi/fact_anomalies.csv",     parse_dates=["date"])
-dkpi = pd.read_csv("outputs/powerbi/dim_kpi.csv")
-ddte = pd.read_csv("outputs/powerbi/dim_date.csv")
-skpi = pd.read_csv("outputs/powerbi/summary_kpi_impact.csv")
-stl  = pd.read_csv("outputs/powerbi/summary_timeline.csv")
+fact = pd.read_csv("PowerBI/data/fact_anomalies.csv",     parse_dates=["date"])
+dkpi = pd.read_csv("PowerBI/data/dim_kpi.csv")
+ddte = pd.read_csv("PowerBI/data/dim_date.csv")
+skpi = pd.read_csv("PowerBI/data/summary_kpi_impact.csv")
+stl  = pd.read_csv("PowerBI/data/summary_timeline.csv")
 
 assert fact.shape == (181, 40) and dkpi.shape == (12, 5)
 assert ddte.shape == (731, 13) and skpi.shape == (17, 9) and stl.shape == (68, 10)
@@ -2611,7 +2600,7 @@ PASS  Total tables in DB: 17
 
 ---
 
-Copy any of the checks above into a Python session or open `scripts/5_Quality_Tests.ipynb` with the project root as the working directory. All 12 tests passing confirms that the alert formatting, report generation, delivery simulation, communication assembly, and Power BI data preparation all completed correctly, and that `communication_results.csv` is certified as the clean, complete Layer 1–5 pipeline output.
+Copy any of the checks above into a Python session or open `scripts/5_Quality_Tests.ipynb` with the project root as the working directory. All 12 tests passing confirms that the alert formatting, report generation, delivery simulation, communication assembly, and dashboard data preparation all completed correctly, and that `communication_results.csv` is certified as the clean, complete Layer 1–5 pipeline output.
 
 ---
 
@@ -2641,7 +2630,7 @@ Nine Python functions that the orchestrator calls via Anthropic `tool_use`. Each
 | `lookup_playbook` | `anomaly_id` | `recommendations.csv` | immediate_action, short_term_fix, preventive_measure, recommended_owner, effort_level |
 | `send_alert` | `anomaly_id` | `delivery_log.csv` | delivery_channel, delivery_status, recipient, message_id |
 | `generate_executive_summary` | `date`, `summary_text` | (write) | Saves text to `outputs/executive_summary_{date}.txt`; returns word_count |
-| `update_powerbi_dataset` | `date` | `communication_results.csv` | Appends/replaces rows for date in `agent_results.csv`; returns rows_written |
+| `update_powerbi_dataset` | `date` | `communication_results.csv` | Appends/replaces rows for date in `agent_results.csv` (dashboard feed); returns rows_written |
 
 **Tool dispatch pattern:**
 
@@ -2694,7 +2683,7 @@ Step 5  PRIORITISE   → prioritize(date)                            [always]
 Step 6  PLAYBOOK     → lookup_playbook(anomaly_id)                 [HIGH + MEDIUM only]
 Step 7  ALERT        → send_alert(anomaly_id)                      [all severities]
 Step 8  SUMMARY      → generate_executive_summary(date, text)      [always; compose first]
-Step 9  POWERBI      → update_powerbi_dataset(date)                [always; absolute last]
+Step 9  DASHBOARD    → update_powerbi_dataset(date)                [always; absolute last]
 ```
 
 **Typical run profile (2024-08-20 — back_to_school_surge, 6 anomalies):**
@@ -2777,7 +2766,7 @@ Entry point for production use. Three run modes selected via mutually exclusive 
 
 | Component | Technology | Purpose |
 |---|---|---|
-| Data store | SQLite (dev) / PostgreSQL / Azure SQL | SQL backend Power BI reads from |
+| Data store | SQLite (dev) / PostgreSQL / Azure SQL | SQL backend for feature and anomaly storage |
 | Feature engineering | `pandas`, `statsmodels` | Rolling stats, z-scores, lag features |
 | Statistical detection | `statsmodels` STL | Fast, interpretable baseline (Method A) |
 | ML detection | `scikit-learn` IsolationForest | Unsupervised multi-KPI detection (Method B) |
@@ -2788,7 +2777,7 @@ Entry point for production use. Three run modes selected via mutually exclusive 
 | Recommendation LLM | Claude API (`claude-haiku-4-5-20251001`) | Per-anomaly action generation (Layer 4) |
 | Prompt caching | `cache_control: ephemeral` | System prompt cached across 101 Layer 4 calls |
 | Alerts | Delivery simulation (`delivery_log.csv`) | Multi-channel routing log (prod: Slack/Email) |
-| Visualisation | Power BI star schema (`fact_anomalies.csv` + 4 dims) | Executive dashboard |
+| Visualisation | React/Vite dashboard (`kpi-anomaly-dashboard/`) + star schema CSVs in `PowerBI/data/` | Interactive analytics dashboard |
 | Scheduler | `schedule` Python package | Daily pipeline trigger at 07:00 |
 
 ---
@@ -3044,9 +3033,9 @@ INFO  No suppressed alerts on 2024-08-20
 
 ---
 
-#### Test 7 — Power BI Export Written and Complete
+#### Test 7 — Dashboard Export Written and Complete
 
-`data/agent_results.csv` must exist, contain rows for the run date, match the detected anomaly count, and include all 10 key downstream columns.
+`data/agent_results.csv` must exist, contain rows for the run date, match the detected anomaly count, and include all 10 key downstream columns. This file feeds the Node.js React dashboard (`kpi-anomaly-dashboard/`).
 
 ```python
 import json
@@ -3094,7 +3083,7 @@ PASS  Required columns present   : ['anomaly_id', 'date', 'kpi', 'tier', 'severi
 
 #### Running all Layer 6 tests
 
-Run `scripts/6_Quality_Tests.ipynb` top-to-bottom after executing `6.3_agent_runner.py`. All 7 tests passing confirms the orchestrator completed all 9 pipeline steps in the correct order, the executive summary was saved, anomaly counts match Layer 2, alert routing is correct, and `agent_results.csv` is ready for Power BI consumption.
+Run `scripts/6_Quality_Tests.ipynb` top-to-bottom after executing `6.3_agent_runner.py`. All 7 tests passing confirms the orchestrator completed all 9 pipeline steps in the correct order, the executive summary was saved, anomaly counts match Layer 2, alert routing is correct, and `agent_results.csv` is ready for dashboard consumption.
 
 ---
 
@@ -3131,14 +3120,15 @@ master_dataset.csv (new daily row arrives)
          ├──→ Recommendations  (playbook lookup + Claude LLM enhancement)
          ├──→ Alert            (Slack / Email, routed by severity)
          ├──→ Executive Brief  (Claude-written daily summary)
-         └──→ Power BI Dataset (anomaly_results.csv refresh)
+         └──→ Dashboard Dataset (agent_results.csv refresh)
                       │
                       ▼
-             Power BI Dashboard
-             ├── Page 1: Command Center
-             ├── Page 2: Root Cause Explorer
-             ├── Page 3: Impact & Recommendations
-             └── Page 4: Executive Summary
+             Node.js React Dashboard (kpi-anomaly-dashboard/)
+             ├── Page 1: Executive Overview
+             ├── Page 2: Anomaly Timeline
+             ├── Page 3: Root Cause Analysis
+             ├── Page 4: Business Impact
+             └── Page 5: Recommendations & Actions
 ```
 
 ---
