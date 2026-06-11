@@ -3,4 +3,4 @@
   "outputDirectory": "kpi-anomaly-dashboard/dist",
   "installCommand": "echo skip",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
-}
+} 
