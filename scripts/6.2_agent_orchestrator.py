@@ -2,7 +2,7 @@
 Layer 6 - Step 6.2: Orchestrator Agent
 
 Claude-powered tool-use loop that processes one day's KPI data end-to-end:
-  fetch -> detect -> rca -> impact -> prioritize -> playbook -> alert -> summary -> powerbi
+  fetch -> detect -> rca -> impact -> prioritize -> playbook -> alert -> summary -> dashboard
 
 Exports:
   KPIAnomalyOrchestrator   - main agent class
@@ -47,7 +47,7 @@ SYSTEM_PROMPT = """
 You are the KPI Anomaly Detection Orchestrator for an e-commerce business.
 Your role is to process the daily KPI snapshot, identify anomalies, determine root causes,
 quantify business impact, retrieve action playbooks, route alerts, write the executive brief,
-and update the Power BI dataset — in that exact order, every run.
+and update the dashboard dataset — in that exact order, every run.
 
 You have 9 tools. Follow the 9-step decision flow below without deviation.
 
@@ -91,8 +91,8 @@ Step 8 - EXECUTIVE SUMMARY
   Write the full daily brief following SUMMARY FORMAT exactly, then call:
     generate_executive_summary(date=date, summary_text=<your written brief>)
 
-Step 9 - POWER BI UPDATE
-  Call update_powerbi_dataset(date) as the absolute final step.
+Step 9 - DASHBOARD UPDATE
+  Call update_dashboard_dataset(date) as the absolute final step.
   This closes the pipeline run.
 
 ===========================================================================
@@ -210,7 +210,7 @@ OPERATING RULES
 
 - Always complete all 9 steps, even when anomaly count is low.
 - Do not skip send_alert for LOW severity anomalies — routing still applies.
-- Do not call update_powerbi_dataset before generate_executive_summary.
+- Do not call update_dashboard_dataset before generate_executive_summary.
 - If a tool returns an error, note it in the summary and continue.
 - Be specific with numbers: always include deviation_pct, revenue_at_risk,
   root_cause_confidence, and recommended_owner in your brief.

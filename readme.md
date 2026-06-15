@@ -2033,7 +2033,7 @@ Five scripts run sequentially on `intelligence_results.csv` (181 × 68) and prod
 | `5.2_report_generator.py` | `outputs/reports/` (per-anomaly HTML + 1 daily summary) | — | Structured HTML alerts with recommendations and impact for distribution |
 | `5.3_delivery_simulation.py` | `delivery_log.csv` | 181 × 13 | `recipient`, `message_id`, `sent_at`, `delivery_status`, `delivery_note` |
 | `5.4_communication_assembly.py` | `communication_results.csv` | 181 × 78 | Joins alert_payloads + delivery_log; 12 internal quality assertions before write |
-| `5.5_powerbi_data_prep.py` | `PowerBI/data/` (5 files) | Various | Star schema: fact_anomalies (181 × 40), dim_kpi, dim_date, summary_kpi_impact, summary_timeline |
+| `5.5_dashboard_data_prep.py` | `outputs/dashboard/` (5 files) | Various | Star schema: fact_anomalies (181 × 40), dim_kpi, dim_date, summary_kpi_impact, summary_timeline |
 
 ---
 
@@ -2089,7 +2089,7 @@ The 5 delivery columns added from the log: `recipient`, `message_id`, `sent_at`,
 
 Reshapes `communication_results.csv` into a star schema for the Node.js React dashboard (`kpi-anomaly-dashboard/`) — dropping raw detection internals, long-text columns (alert_body, delivery_note), and redundant signals not suited for visual slicing.
 
-**Output files (all written to `PowerBI/data/`):**
+**Output files (all written to `outputs/dashboard/`):**
 
 | File | Shape | Description |
 |---|---|---|
@@ -2107,13 +2107,13 @@ fact_anomalies[kpi]  → dim_kpi[kpi]    (many-to-one)
 
 **React dashboard usage:**
 
-Copy the 5 CSV files from `PowerBI/data/` into `kpi-anomaly-dashboard/public/data/` before running the dashboard. The dashboard (`npm run dev` from `kpi-anomaly-dashboard/`) reads them client-side via PapaParse and joins `dim_kpi` onto `fact_anomalies` on the `kpi` column to add labels, tiers, and owners to every fact row. All 5 pages (Executive Overview, Anomaly Timeline, Root Cause Analysis, Business Impact, Recommendations & Actions) react to live filter changes across the shared dataset.
+Copy the 5 CSV files from `outputs/dashboard/` into `kpi-anomaly-dashboard/public/data/` before running the dashboard. The dashboard (`npm run dev` from `kpi-anomaly-dashboard/`) reads them client-side via PapaParse and joins `dim_kpi` onto `fact_anomalies` on the `kpi` column to add labels, tiers, and owners to every fact row. All 5 pages (Executive Overview, Anomaly Timeline, Root Cause Analysis, Business Impact, Recommendations & Actions) react to live filter changes across the shared dataset.
 
 ---
 
 ## Step 5.6 — Layer 5 Quality Tests
 
-Run these checks after executing all five Layer 5 scripts (`5.1_alert_formatter.py`, `5.2_report_generator.py`, `5.3_delivery_simulation.py`, `5.4_communication_assembly.py`, `PowerBI/scripts/5.5_powerbi_data_prep.py`) to confirm the Communication Layer produced valid output. All inputs (`alert_payloads.csv`, `delivery_log.csv`, `communication_results.csv`, `outputs/reports/`, `PowerBI/data/`) must exist before running.
+Run these checks after executing all five Layer 5 scripts (`5.1_alert_formatter.py`, `5.2_report_generator.py`, `5.3_delivery_simulation.py`, `5.4_communication_assembly.py`, `scripts/5.5_dashboard_data_prep.py`) to confirm the Communication Layer produced valid output. All inputs (`alert_payloads.csv`, `delivery_log.csv`, `communication_results.csv`, `outputs/reports/`, `outputs/dashboard/`) must exist before running.
 
 ---
 
@@ -2502,11 +2502,11 @@ Step 5.5 produces five dashboard-ready files. Shape, referential integrity (anom
 ```python
 import pandas as pd
 
-fact = pd.read_csv("PowerBI/data/fact_anomalies.csv",     parse_dates=["date"])
-dkpi = pd.read_csv("PowerBI/data/dim_kpi.csv")
-ddte = pd.read_csv("PowerBI/data/dim_date.csv")
-skpi = pd.read_csv("PowerBI/data/summary_kpi_impact.csv")
-stl  = pd.read_csv("PowerBI/data/summary_timeline.csv")
+fact = pd.read_csv("outputs/dashboard/fact_anomalies.csv",     parse_dates=["date"])
+dkpi = pd.read_csv("outputs/dashboard/dim_kpi.csv")
+ddte = pd.read_csv("outputs/dashboard/dim_date.csv")
+skpi = pd.read_csv("outputs/dashboard/summary_kpi_impact.csv")
+stl  = pd.read_csv("outputs/dashboard/summary_timeline.csv")
 
 assert fact.shape == (181, 40) and dkpi.shape == (12, 5)
 assert ddte.shape == (731, 13) and skpi.shape == (17, 9) and stl.shape == (68, 10)
@@ -2630,7 +2630,7 @@ Nine Python functions that the orchestrator calls via Anthropic `tool_use`. Each
 | `lookup_playbook` | `anomaly_id` | `recommendations.csv` | immediate_action, short_term_fix, preventive_measure, recommended_owner, effort_level |
 | `send_alert` | `anomaly_id` | `delivery_log.csv` | delivery_channel, delivery_status, recipient, message_id |
 | `generate_executive_summary` | `date`, `summary_text` | (write) | Saves text to `outputs/executive_summary_{date}.txt`; returns word_count |
-| `update_powerbi_dataset` | `date` | `communication_results.csv` | Appends/replaces rows for date in `agent_results.csv` (dashboard feed); returns rows_written |
+| `update_dashboard_dataset` | `date` | `communication_results.csv` | Appends/replaces rows for date in `agent_results.csv` (dashboard feed); returns rows_written |
 
 **Tool dispatch pattern:**
 
@@ -2683,7 +2683,7 @@ Step 5  PRIORITISE   → prioritize(date)                            [always]
 Step 6  PLAYBOOK     → lookup_playbook(anomaly_id)                 [HIGH + MEDIUM only]
 Step 7  ALERT        → send_alert(anomaly_id)                      [all severities]
 Step 8  SUMMARY      → generate_executive_summary(date, text)      [always; compose first]
-Step 9  DASHBOARD    → update_powerbi_dataset(date)                [always; absolute last]
+Step 9  DASHBOARD    → update_dashboard_dataset(date)                [always; absolute last]
 ```
 
 **Typical run profile (2024-08-20 — back_to_school_surge, 6 anomalies):**
@@ -2709,7 +2709,7 @@ Step 9  DASHBOARD    → update_powerbi_dataset(date)                [always; ab
   "tool_call_count": 20,
   "tools_used": ["fetch_kpis", "run_detection", "run_rca", "score_impact",
                  "prioritize", "lookup_playbook", "send_alert",
-                 "generate_executive_summary", "update_powerbi_dataset"],
+                 "generate_executive_summary", "update_dashboard_dataset"],
   "final_text": "...(agent's full narrative output)...",
   "tool_trace": [
     {
@@ -2777,7 +2777,7 @@ Entry point for production use. Three run modes selected via mutually exclusive 
 | Recommendation LLM | Claude API (`claude-haiku-4-5-20251001`) | Per-anomaly action generation (Layer 4) |
 | Prompt caching | `cache_control: ephemeral` | System prompt cached across 101 Layer 4 calls |
 | Alerts | Delivery simulation (`delivery_log.csv`) | Multi-channel routing log (prod: Slack/Email) |
-| Visualisation | React/Vite dashboard (`kpi-anomaly-dashboard/`) + star schema CSVs in `PowerBI/data/` | Interactive analytics dashboard |
+| Visualisation | React/Vite dashboard (`kpi-anomaly-dashboard/`) + star schema CSVs in `outputs/dashboard/` | Interactive analytics dashboard |
 | Scheduler | `schedule` Python package | Daily pipeline trigger at 07:00 |
 
 ---
@@ -2836,7 +2836,7 @@ with open("data/agent_run_log.json", encoding="utf-8") as f:
 REQUIRED = [
     "fetch_kpis", "run_detection", "run_rca", "score_impact",
     "prioritize", "lookup_playbook", "send_alert",
-    "generate_executive_summary", "update_powerbi_dataset",
+    "generate_executive_summary", "update_dashboard_dataset",
 ]
 
 missing = [t for t in REQUIRED if t not in log["tools_used"]]
@@ -2857,14 +2857,14 @@ PASS  prioritize                                1 call(s)
 PASS  lookup_playbook                           3 call(s)
 PASS  send_alert                                6 call(s)
 PASS  generate_executive_summary                1 call(s)
-PASS  update_powerbi_dataset                    1 call(s)
+PASS  update_dashboard_dataset                    1 call(s)
 ```
 
 ---
 
 #### Test 3 — Decision Flow Order Respected
 
-The agent must call tools in the correct causal order. `update_powerbi_dataset` must be the absolute last tool call.
+The agent must call tools in the correct causal order. `update_dashboard_dataset` must be the absolute last tool call.
 
 ```python
 import json
@@ -2886,7 +2886,7 @@ ORDER = [
     ("prioritize",                 "lookup_playbook"),
     ("lookup_playbook",            "send_alert"),
     ("send_alert",                 "generate_executive_summary"),
-    ("generate_executive_summary", "update_powerbi_dataset"),
+    ("generate_executive_summary", "update_dashboard_dataset"),
 ]
 
 for earlier, later in ORDER:
@@ -2895,8 +2895,8 @@ for earlier, later in ORDER:
     print(f"PASS  {earlier:<35} before  {later}")
 
 last_tool = trace[-1]["tool_name"]
-assert last_tool == "update_powerbi_dataset", f"Last tool was {last_tool!r}"
-print(f"\nPASS  update_powerbi_dataset is the final tool call (step {trace[-1]['step']})")
+assert last_tool == "update_dashboard_dataset", f"Last tool was {last_tool!r}"
+print(f"\nPASS  update_dashboard_dataset is the final tool call (step {trace[-1]['step']})")
 ```
 
 Expected:
@@ -2907,9 +2907,9 @@ PASS  run_detection                        before  score_impact
 PASS  prioritize                           before  lookup_playbook
 PASS  lookup_playbook                      before  send_alert
 PASS  send_alert                           before  generate_executive_summary
-PASS  generate_executive_summary           before  update_powerbi_dataset
+PASS  generate_executive_summary           before  update_dashboard_dataset
 
-PASS  update_powerbi_dataset is the final tool call (step 20)
+PASS  update_dashboard_dataset is the final tool call (step 20)
 ```
 
 ---

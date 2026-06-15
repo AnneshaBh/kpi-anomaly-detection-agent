@@ -38,7 +38,6 @@ ANO-20240621-ROAS,2024-06-21,avg_roas,1,MEDIUM,DOWN,-74.06,-1.0004,0,,avg_roas,a
 ANO-20240622-ROAS,2024-06-22,avg_roas,1,MEDIUM,DOWN,-41.34,-0.6212,0,,avg_roas,avg_roas,-0.6212,DOWN,0,"avg_order_value_usd, inventory_health",,no_anomalous_child
 ANO-20240624-ROAS,2024-06-24,avg_roas,1,MEDIUM,UP,141.99,1.7119,0,,avg_roas,avg_roas,1.7119,UP,0,inventory_health,,no_anomalous_child
 ANO-20240626-ROAS,2024-06-26,avg_roas,1,MEDIUM,DOWN,-67.75,-0.6301,0,,avg_roas,avg_roas,-0.6301,DOWN,0,bounce_rate,,no_anomalous_child
-ANO-20240708-ROAS,2024-07-08,avg_roas,1,MEDIUM,UP,184.13,2.1136,0,,avg_roas,avg_roas,2.1136,UP,0,,,no_anomalous_child
 ANO-20240710-ROAS,2024-07-10,avg_roas,1,MEDIUM,DOWN,-59.43,-0.7114,1,marketing_tracking_outage,avg_roas,avg_roas,-0.7114,DOWN,0,"avg_order_value_usd, total_revenue_usd",,no_anomalous_child
 ANO-20240711-ROAS,2024-07-11,avg_roas,1,MEDIUM,UP,96.64,1.2225,0,,avg_roas,avg_roas,1.2225,UP,0,"avg_order_value_usd, return_rate, total_revenue_usd",,no_anomalous_child
 ANO-20240723-ROAS,2024-07-23,avg_roas,1,MEDIUM,DOWN,-88.44,-0.9054,0,,avg_roas,avg_roas,-0.9054,DOWN,0,"avg_order_value_usd, inventory_health",,no_anomalous_child
@@ -80,7 +79,6 @@ ANO-20250925-ROAS,2025-09-25,avg_roas,1,HIGH,UP,60.01,0.7617,0,,avg_roas,avg_roa
 ANO-20251108-ROAS,2025-11-08,avg_roas,1,MEDIUM,UP,192.09,1.9763,0,,avg_roas,avg_roas,1.9763,UP,0,,,no_anomalous_child
 ANO-20251128-ROAS,2025-11-28,avg_roas,1,MEDIUM,DOWN,-58.79,-0.9295,1,black_friday_spike,avg_roas -> total_clicks,total_clicks,-1.8655,DOWN,1,"avg_order_value_usd, n_orders, total_clicks, total_revenue_usd",avg_roas,leaf_node_reached
 ANO-20251224-ROAS,2025-12-24,avg_roas,1,MEDIUM,UP,169.86,2.0137,0,,avg_roas -> total_clicks,total_clicks,1.7566,UP,1,"conversion_rate, inventory_health, n_orders, total_clicks, total_revenue_usd",avg_roas,leaf_node_reached
-ANO-20251226-ROAS,2025-12-26,avg_roas,1,MEDIUM,UP,73.54,1.0733,0,,avg_roas,avg_roas,1.0733,UP,0,,,no_anomalous_child
 ANO-20240417-CVR,2024-04-17,conversion_rate,1,MEDIUM,UP,11.32,1.8499,0,,conversion_rate -> avg_discount_pct,avg_discount_pct,1.8377,UP,1,"avg_discount_pct, n_orders, sessions, total_revenue_usd","conversion_rate, n_orders, total_revenue_usd",leaf_node_reached
 ANO-20240618-CVR,2024-06-18,conversion_rate,1,MEDIUM,UP,16.03,2.1583,1,website_outage,conversion_rate -> avg_discount_pct,avg_discount_pct,2.1964,UP,1,"avg_discount_pct, avg_order_value_usd, n_orders, sessions, total_revenue_usd","conversion_rate, n_orders, total_revenue_usd",leaf_node_reached
 ANO-20240620-CVR,2024-06-20,conversion_rate,1,MEDIUM,UP,13.98,1.3312,0,,conversion_rate,conversion_rate,1.3312,UP,0,,"n_orders, total_revenue_usd",no_anomalous_child

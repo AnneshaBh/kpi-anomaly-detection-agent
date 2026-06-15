@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useMemo } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import Papa from 'papaparse'
 import { parseISO } from 'date-fns'
 
@@ -35,6 +35,12 @@ export function DataProvider({ children }) {
   const [raw, setRaw] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const refresh = useCallback(() => {
+    setLoading(true)
+    setRefreshKey(k => k + 1)
+  }, [])
 
   useEffect(() => {
     Promise.all([
@@ -77,10 +83,10 @@ export function DataProvider({ children }) {
         setError(err.message)
         setLoading(false)
       })
-  }, [])
+  }, [refreshKey])
 
   return (
-    <DataContext.Provider value={{ data: raw, loading, error }}>
+    <DataContext.Provider value={{ data: raw, loading, error, refresh }}>
       {children}
     </DataContext.Provider>
   )

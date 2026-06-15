@@ -267,4 +267,4 @@ conn.close()
 
 print()
 print(f"Step 5.4 complete — communication_results.csv written (181 rows x 78 cols).")
-print("Layer 5 pipeline certified. Ready for Step 5.5 (Power BI Data Prep).")
+print("Layer 5 pipeline certified. Ready for Step 5.5 (Dashboard Data Prep).")

@@ -195,10 +195,10 @@ def generate_executive_summary(date: str, summary_text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 9 — update_powerbi_dataset
+# Tool 9 — update_dashboard_dataset
 # ---------------------------------------------------------------------------
 
-def update_powerbi_dataset(date: str) -> dict:
+def update_dashboard_dataset(date: str) -> dict:
     """
     Write agent-processed rows for a given date to data/agent_results.csv.
     Appends to the file if it already exists; replaces any prior rows for the same date.
@@ -238,7 +238,7 @@ TOOL_DISPATCH = {
     "lookup_playbook":           lookup_playbook,
     "send_alert":                send_alert,
     "generate_executive_summary": generate_executive_summary,
-    "update_powerbi_dataset":    update_powerbi_dataset,
+    "update_dashboard_dataset":  update_dashboard_dataset,
 }
 
 
@@ -412,9 +412,9 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "update_powerbi_dataset",
+        "name": "update_dashboard_dataset",
         "description": (
-            "Write the agent-processed rows for a given date to data/agent_results.csv for Power BI consumption. "
+            "Write the agent-processed rows for a given date to data/agent_results.csv for dashboard consumption. "
             "Appends to the file and replaces any prior rows for the same date. "
             "Call this as the final step after all analysis is complete."
         ),
@@ -499,12 +499,12 @@ if __name__ == "__main__":
     )
     print(f"[exec_summary]      status={result['status']} | words={result['word_count']} | path={result['path']}")
 
-    # update_powerbi_dataset
-    result = update_powerbi_dataset(TEST_DATE)
+    # update_dashboard_dataset
+    result = update_dashboard_dataset(TEST_DATE)
     if "error" not in result:
-        print(f"[powerbi_update]    rows_written={result['rows_written']} | total_in_file={result['total_rows_in_file']}")
+        print(f"[dashboard_update]  rows_written={result['rows_written']} | total_in_file={result['total_rows_in_file']}")
     else:
-        print(f"[powerbi_update]    {result}")
+        print(f"[dashboard_update]  {result}")
 
     print("\n" + "=" * 60)
     print(f"Tool definitions registered: {len(TOOL_DEFINITIONS)}")

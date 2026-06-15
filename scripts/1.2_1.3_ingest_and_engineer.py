@@ -5,7 +5,7 @@ ingest_and_engineer.py
 Reads master_dataset.csv, computes 6 feature-engineering columns for every
 primary KPI, and writes the processed result to:
     data/processed_kpi_features.csv   -- full-history feature table
-    data/kpi_anomaly_detection.db     -- SQLite database (Power BI source)
+    data/kpi_anomaly_detection.db     -- SQLite database (dashboard source)
 
 Six features are added per KPI  (column naming: {kpi}_{feature}):
     rolling_mean   7-day rolling mean             — smooths daily noise

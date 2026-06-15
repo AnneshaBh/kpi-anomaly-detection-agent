@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './context/AuthContext'
 import { DataProvider } from './hooks/useCSVData'
 import { FilterProvider } from './hooks/useFilters'
 import Sidebar from './components/layout/Sidebar'
@@ -12,6 +13,7 @@ import RecommendationsActions from './pages/RecommendationsActions'
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <DataProvider>
         <FilterProvider>
           <div className="flex h-screen bg-page overflow-hidden font-sans">
@@ -32,6 +34,7 @@ export default function App() {
           </div>
         </FilterProvider>
       </DataProvider>
+      </AuthProvider>
     </BrowserRouter>
   )
 }
