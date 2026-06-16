@@ -2,5 +2,6 @@
   "installCommand": "cd kpi-anomaly-dashboard && npm install",
   "buildCommand": "cd kpi-anomaly-dashboard && npm run build",
   "outputDirectory": "kpi-anomaly-dashboard/dist",
+  "framework": null,
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
