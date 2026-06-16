@@ -4,7 +4,6 @@ import { useFilters } from '../../hooks/useFilters'
 import { useAuth } from '../../context/AuthContext'
 import { format } from 'date-fns'
 import { COLORS } from '../../utils/formatters'
-import LoginModal from '../auth/LoginModal'
 
 function GridIcon() {
   return (
@@ -20,12 +19,11 @@ function GridIcon() {
 const STATUS_COLOR = { running: COLORS.MUTED, done: COLORS.LOW, error: COLORS.HIGH }
 
 export default function TopBar() {
-  const { data, refresh }        = useCSVData()
-  const { filters, resetFilters } = useFilters()
-  const { isAuthenticated, username, logout, token } = useAuth()
+  const { data, refresh }          = useCSVData()
+  const { filters, resetFilters }  = useFilters()
+  const { username, logout }       = useAuth()
 
-  const [showLogin, setShowLogin]         = useState(false)
-  const [pipelineState, setPipelineState] = useState('idle')   // idle | running | done | error
+  const [pipelineState, setPipelineState] = useState('idle')
   const [pipelineStep, setPipelineStep]   = useState(null)
   const [pipelineError, setPipelineError] = useState(null)
   const pollRef = useRef(null)
@@ -47,19 +45,15 @@ export default function TopBar() {
     setPipelineError(null)
 
     try {
-      const res = await fetch('/api/run-pipeline', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      const res = await fetch('/api/run-pipeline', { method: 'POST' })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail ?? 'Failed to start pipeline')
       }
 
-      // Poll status every 2 s until done or error
       pollRef.current = setInterval(async () => {
         try {
-          const sr     = await fetch('/api/pipeline-status', { headers: { Authorization: `Bearer ${token}` } })
+          const sr     = await fetch('/api/pipeline-status')
           const status = await sr.json()
           setPipelineStep(status.step)
 
@@ -117,53 +111,40 @@ export default function TopBar() {
         Reset filters
       </button>
 
-      {isAuthenticated ? (
-        <>
-          {statusLabel && (
-            <span
-              className="text-xs font-medium hidden md:block max-w-xs truncate"
-              style={{ color: STATUS_COLOR[pipelineState] }}
-              title={pipelineError ?? undefined}
-            >
-              {statusLabel}
-            </span>
-          )}
-
-          <button
-            onClick={handleRefresh}
-            disabled={pipelineState === 'running'}
-            className="text-xs px-3 py-1 font-semibold text-white disabled:opacity-60 whitespace-nowrap"
-            style={{
-              background: pipelineState === 'running' ? COLORS.MUTED : COLORS.CHART_BLUE,
-              borderRadius: 4,
-              border: 'none',
-              cursor: pipelineState === 'running' ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {pipelineState === 'running' ? 'Running…' : 'Refresh Pipeline'}
-          </button>
-
-          <div className="h-4 w-px bg-border" />
-
-          <span className="text-xs text-muted hidden sm:block">{username}</span>
-          <button
-            onClick={logout}
-            className="text-xs px-2 py-1 rounded border border-border text-muted hover:bg-gray-100 hover:text-ink transition-all whitespace-nowrap"
-          >
-            Sign out
-          </button>
-        </>
-      ) : (
-        <button
-          onClick={() => setShowLogin(true)}
-          className="text-xs px-3 py-1 font-semibold text-white whitespace-nowrap"
-          style={{ background: COLORS.CHART_BLUE, borderRadius: 4, border: 'none', cursor: 'pointer' }}
+      {statusLabel && (
+        <span
+          className="text-xs font-medium hidden md:block max-w-xs truncate"
+          style={{ color: STATUS_COLOR[pipelineState] }}
+          title={pipelineError ?? undefined}
         >
-          Sign in
-        </button>
+          {statusLabel}
+        </span>
       )}
 
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      <button
+        onClick={handleRefresh}
+        disabled={pipelineState === 'running'}
+        className="text-xs px-3 py-1 font-semibold text-white disabled:opacity-60 whitespace-nowrap"
+        style={{
+          background: pipelineState === 'running' ? COLORS.MUTED : COLORS.CHART_BLUE,
+          borderRadius: 4,
+          border: 'none',
+          cursor: pipelineState === 'running' ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {pipelineState === 'running' ? 'Running…' : 'Refresh Pipeline'}
+      </button>
+
+      <div className="h-4 w-px bg-border" />
+
+      <span className="text-xs text-muted hidden sm:block">{username}</span>
+      <button
+        onClick={logout}
+        className="text-xs px-3 py-1 font-semibold text-white whitespace-nowrap"
+        style={{ background: COLORS.CHART_BLUE, borderRadius: 4, border: 'none', cursor: 'pointer' }}
+      >
+        Sign out
+      </button>
     </header>
   )
 }

@@ -1,0 +1,156 @@
+{
+  "description": "KPI monitoring tier configuration for the anomaly detection engine",
+  "generated_on": "2025-12-31",
+  "total_dataset_rows": 731,
+  "tiers": {
+    "1": {
+      "label": "TIER 1 - ALERT IMMEDIATELY",
+      "alert_sla": "< 10 minutes",
+      "z_watch": 1.5,
+      "z_anomaly": 2.5,
+      "z_severe": 3.5,
+      "wow_threshold": 0.2,
+      "mom_threshold": 0.15,
+      "kpis": [
+        "total_revenue_usd",
+        "n_orders",
+        "avg_roas",
+        "conversion_rate"
+      ],
+      "kpi_metadata": {
+        "total_revenue_usd": {
+          "tier": 1,
+          "historical_watch_days": 126,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "n_orders": {
+          "tier": 1,
+          "historical_watch_days": 111,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "avg_roas": {
+          "tier": 1,
+          "historical_watch_days": 70,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "conversion_rate": {
+          "tier": 1,
+          "historical_watch_days": 122,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        }
+      }
+    },
+    "2": {
+      "label": "TIER 2 - ALERT WITHIN 1 HOUR",
+      "alert_sla": "< 1 hour",
+      "z_watch": 1.5,
+      "z_anomaly": 2.5,
+      "z_severe": 3.5,
+      "wow_threshold": 0.2,
+      "mom_threshold": 0.15,
+      "kpis": [
+        "return_rate",
+        "n_stockouts",
+        "avg_order_value_usd",
+        "bounce_rate"
+      ],
+      "kpi_metadata": {
+        "return_rate": {
+          "tier": 2,
+          "historical_watch_days": 96,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "n_stockouts": {
+          "tier": 2,
+          "historical_watch_days": 17,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 129
+        },
+        "avg_order_value_usd": {
+          "tier": 2,
+          "historical_watch_days": 157,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "bounce_rate": {
+          "tier": 2,
+          "historical_watch_days": 81,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 729
+        }
+      }
+    },
+    "3": {
+      "label": "TIER 3 - DAILY DIGEST",
+      "alert_sla": "24 hours",
+      "z_watch": 1.5,
+      "z_anomaly": 3.0,
+      "z_severe": 3.5,
+      "wow_threshold": 0.25,
+      "mom_threshold": 0.2,
+      "kpis": [
+        "total_clicks",
+        "sessions",
+        "inventory_health",
+        "avg_discount_pct"
+      ],
+      "kpi_metadata": {
+        "total_clicks": {
+          "tier": 3,
+          "historical_watch_days": 72,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "sessions": {
+          "tier": 3,
+          "historical_watch_days": 138,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "inventory_health": {
+          "tier": 3,
+          "historical_watch_days": 132,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 730
+        },
+        "avg_discount_pct": {
+          "tier": 3,
+          "historical_watch_days": 75,
+          "historical_anomaly_days": 0,
+          "historical_severe_days": 0,
+          "total_valid_z_days": 663
+        }
+      }
+    }
+  },
+  "kpi_tier_map": {
+    "total_revenue_usd": 1,
+    "n_orders": 1,
+    "avg_roas": 1,
+    "conversion_rate": 1,
+    "return_rate": 2,
+    "n_stockouts": 2,
+    "avg_order_value_usd": 2,
+    "bounce_rate": 2,
+    "total_clicks": 3,
+    "sessions": 3,
+    "inventory_health": 3,
+    "avg_discount_pct": 3
+  }
+}

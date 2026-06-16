@@ -1,9 +1,9 @@
 ====================================================================
 KPI ANOMALY DETECTION — DELIVERY SIMULATION SUMMARY
 ====================================================================
-Generated : 2026-06-03 07:40
+Generated : 2026-06-16 11:38
 
-TOTAL ALERTS PROCESSED : 181
+TOTAL ALERTS PROCESSED : 182
 
 --------------------------------------------------------------------
 ROUTING & DELIVERY SUMMARY
@@ -11,7 +11,7 @@ ROUTING & DELIVERY SUMMARY
   Flag            Count  Status        Channel               Timing
   -------------  -----  -----------  --------------------  ------------------------------
   ESCALATE           15  SENT          Slack + Email         Same-day at 09:30
-  INVESTIGATE        86  QUEUED        Email                 Next business day at 08:00
+  INVESTIGATE        87  QUEUED        Email                 Next business day at 08:00
   MONITOR            74  SCHEDULED     Digest                Next Monday at 09:00
   SUPPRESSED          6  SUPPRESSED    None (Audit log)      Logged same-day at 09:00
 
@@ -19,27 +19,27 @@ ROUTING & DELIVERY SUMMARY
 SIMULATED TIMELINE
 --------------------------------------------------------------------
   SENT      window : 2024-01-11 09:30:00 – 2025-11-28 09:30:00
-  QUEUED    window : 2024-01-31 08:00 – 2025-12-29 08:00
+  QUEUED    window : 2024-01-31 08:00 – 2025-12-25 08:00
   SCHEDULED window : 2024-04-22 09:00 – 2025-12-01 09:00
 
 --------------------------------------------------------------------
 IMMEDIATE ESCALATIONS (SENT)
 --------------------------------------------------------------------
-  2024-01-11 09:30  ANO-20240111-ROAS       avg_roas                MSG-ESC-0006
-  2024-01-31 09:30  ANO-20240131-ROAS       avg_roas                MSG-ESC-0012
-  2024-08-20 09:30  ANO-20240820-REV        total_revenue_usd       MSG-ESC-0004
-  2024-08-20 09:30  ANO-20240820-ORD        n_orders                MSG-ESC-0005
+  2024-01-11 09:30  ANO-20240111-ROAS       avg_roas                MSG-ESC-0003
+  2024-01-31 09:30  ANO-20240131-ROAS       avg_roas                MSG-ESC-0009
+  2024-08-20 09:30  ANO-20240820-REV        total_revenue_usd       MSG-ESC-0005
+  2024-08-20 09:30  ANO-20240820-ORD        n_orders                MSG-ESC-0006
   2024-11-29 09:30  ANO-20241129-REV        total_revenue_usd       MSG-ESC-0001
-  2024-11-29 09:30  ANO-20241129-ORD        n_orders                MSG-ESC-0008
-  2024-11-29 09:30  ANO-20241129-ROAS       avg_roas                MSG-ESC-0011
-  2024-12-02 09:30  ANO-20241202-REV        total_revenue_usd       MSG-ESC-0003
-  2024-12-02 09:30  ANO-20241202-ORD        n_orders                MSG-ESC-0013
-  2025-01-14 09:30  ANO-20250114-ROAS       avg_roas                MSG-ESC-0014
-  2025-05-25 09:30  ANO-20250525-ROAS       avg_roas                MSG-ESC-0009
-  2025-09-24 09:30  ANO-20250924-ROAS       avg_roas                MSG-ESC-0010
-  2025-09-25 09:30  ANO-20250925-ROAS       avg_roas                MSG-ESC-0015
+  2024-11-29 09:30  ANO-20241129-ROAS       avg_roas                MSG-ESC-0010
+  2024-11-29 09:30  ANO-20241129-ORD        n_orders                MSG-ESC-0012
+  2024-12-02 09:30  ANO-20241202-REV        total_revenue_usd       MSG-ESC-0007
+  2024-12-02 09:30  ANO-20241202-ORD        n_orders                MSG-ESC-0015
+  2025-01-14 09:30  ANO-20250114-ROAS       avg_roas                MSG-ESC-0008
+  2025-05-25 09:30  ANO-20250525-ROAS       avg_roas                MSG-ESC-0004
+  2025-09-24 09:30  ANO-20250924-ROAS       avg_roas                MSG-ESC-0013
+  2025-09-25 09:30  ANO-20250925-ROAS       avg_roas                MSG-ESC-0014
   2025-11-28 09:30  ANO-20251128-REV        total_revenue_usd       MSG-ESC-0002
-  2025-11-28 09:30  ANO-20251128-ORD        n_orders                MSG-ESC-0007
+  2025-11-28 09:30  ANO-20251128-ORD        n_orders                MSG-ESC-0011
 
 --------------------------------------------------------------------
 SUPPRESSED ALERTS (AUDIT LOG ONLY)

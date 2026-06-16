@@ -1,1 +1,0 @@
-TEST SUMMARY for 2024-03-15: pipeline smoke test — 2 anomalies detected.

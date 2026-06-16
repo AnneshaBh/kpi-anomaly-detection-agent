@@ -2,51 +2,73 @@
 KPI Anomaly Detection — FastAPI backend
 
 Endpoints:
-  POST /api/login            — returns JWT token (no auth required)
-  GET  /api/me               — returns current username (auth required)
-  POST /api/run-pipeline     — triggers full pipeline run (auth required)
-  GET  /api/pipeline-status  — returns current run state (auth required)
+  POST /api/run-pipeline     — triggers full pipeline run
+  GET  /api/pipeline-status  — returns current run state
 """
 
 import asyncio
-import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
 
-from auth import authenticate, create_token, decode_token
+BASE_DIR    = Path(__file__).parent.parent
+load_dotenv(BASE_DIR / ".env")   # loads root .env (ANTHROPIC_API_KEY etc.)
+SCRIPTS_DIR = BASE_DIR / "scripts"
+LOGS_DIR    = BASE_DIR / "logs"
+LOGS_DIR.mkdir(exist_ok=True)
 
-BASE_DIR       = Path(__file__).parent.parent
-SCRIPTS_DIR    = BASE_DIR / "scripts"
-DASHBOARD_OUT_DIR = BASE_DIR / "outputs" / "dashboard"
-DASHBOARD_DATA = BASE_DIR / "kpi-anomaly-dashboard" / "public" / "data"
-
-PIPELINE_SCRIPTS = [
-    "1.1_build_master_dataset.py",
-    "1.2_1.3_ingest_and_engineer.py",
-    "2.1_kpi_monitoring_tiers.py",
-    "2.2a_statistical_baseline.py",
-    "2.2b_isolation_forest.py",
-    "2.2c_prophet.py",
-    "2.3_ensemble_voting.py",
-    "3.1_dependency_graph.py",
-    "3.2_causal_inference.py",
-    "3.3_external_drivers.py",
-    "3.4_rca_assembly.py",
-    "4.1_business_impact_quantification.py",
-    "4.2_prioritization_engine.py",
-    "4.3_recommendation_engine.py",
-    "4.4_intelligence_assembly.py",
-    "5.1_alert_formatter.py",
-    "5.2_report_generator.py",
-    "5.3_delivery_simulation.py",
-    "5.4_communication_assembly.py",
-    "5.5_dashboard_data_prep.py",
+PIPELINE_LAYERS = [
+    {
+        "name": "Layer 1 — Data Ingestion & Engineering",
+        "scripts": [
+            SCRIPTS_DIR / "raw"       / "1.1_build_master_dataset.py",
+            SCRIPTS_DIR / "processed" / "1.2_1.3_ingest_and_engineer.py",
+        ],
+    },
+    {
+        "name": "Layer 2 — Anomaly Detection",
+        "scripts": [
+            SCRIPTS_DIR / "detection" / "2.1_KPI_Monitoring_Tiers.py",
+            SCRIPTS_DIR / "detection" / "2.2A_Statistical_Baseline.py",
+            SCRIPTS_DIR / "detection" / "2.2B_Isolation_Forest.py",
+            SCRIPTS_DIR / "detection" / "2.2C_Prophet.py",
+            SCRIPTS_DIR / "detection" / "2.3_Ensemble_Voting.py",
+        ],
+    },
+    {
+        "name": "Layer 3 — Root Cause Analysis",
+        "scripts": [
+            SCRIPTS_DIR / "rca" / "3.1_dependency_graph.py",
+            SCRIPTS_DIR / "rca" / "3.2_causal_inference.py",
+            SCRIPTS_DIR / "rca" / "3.3_external_drivers.py",
+            SCRIPTS_DIR / "rca" / "3.4_rca_assembly.py",
+        ],
+    },
+    {
+        "name": "Layer 4 — Intelligence Engine",
+        "scripts": [
+            SCRIPTS_DIR / "intelligence" / "4.1_business_impact_quantification.py",
+            SCRIPTS_DIR / "intelligence" / "4.2_prioritization_engine.py",
+            SCRIPTS_DIR / "intelligence" / "4.3_recommendation_engine.py",
+            SCRIPTS_DIR / "intelligence" / "4.4_intelligence_assembly.py",
+        ],
+    },
+    {
+        "name": "Layer 5 — Communication & Dashboard",
+        "scripts": [
+            SCRIPTS_DIR / "communication" / "5.1_alert_formatter.py",
+            SCRIPTS_DIR / "communication" / "5.2_report_generator.py",
+            SCRIPTS_DIR / "communication" / "5.3_delivery_simulation.py",
+            SCRIPTS_DIR / "communication" / "5.4_communication_assembly.py",
+            SCRIPTS_DIR / "communication" / "5.5_dashboard_data_prep.py",
+        ],
+    },
 ]
 
 _pipeline_status: dict = {"state": "idle", "step": None, "error": None}
@@ -61,48 +83,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_bearer = HTTPBearer()
-
-
-def _get_current_user(creds: HTTPAuthorizationCredentials = Depends(_bearer)) -> str:
-    try:
-        return decode_token(creds.credentials)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-
-
-# ── Request models ─────────────────────────────────────────────────────────────
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-# ── Endpoints ──────────────────────────────────────────────────────────────────
-
-@app.post("/api/login")
-def login(body: LoginRequest):
-    if not authenticate(body.username, body.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
-    return {"token": create_token(body.username), "username": body.username}
-
-
-@app.get("/api/me")
-def me(user: str = Depends(_get_current_user)):
-    return {"username": user}
-
 
 @app.get("/api/pipeline-status")
-def pipeline_status(user: str = Depends(_get_current_user)):
+def pipeline_status():
     return _pipeline_status
 
 
 @app.post("/api/run-pipeline")
-async def run_pipeline(user: str = Depends(_get_current_user)):
+async def run_pipeline():
     if _pipeline_status["state"] == "running":
         raise HTTPException(status_code=409, detail="Pipeline is already running")
     asyncio.create_task(_execute_pipeline())
     return {"message": "Pipeline started"}
+
+
+# ── Logging helpers ────────────────────────────────────────────────────────────
+
+def _ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _log(f, msg: str) -> None:
+    line = f"[{_ts()}] {msg}"
+    print(line)
+    f.write(line + "\n")
+    f.flush()
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────────
@@ -111,34 +115,112 @@ async def _execute_pipeline() -> None:
     global _pipeline_status
     _pipeline_status = {"state": "running", "step": None, "error": None}
 
-    try:
-        for script in PIPELINE_SCRIPTS:
-            _pipeline_status["step"] = script
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, str(SCRIPTS_DIR / script)],
-                capture_output=True,
-                text=True,
-                cwd=str(BASE_DIR),
-            )
-            if result.returncode != 0:
-                _pipeline_status = {
-                    "state": "error",
-                    "step": script,
-                    "error": (result.stderr or result.stdout)[-600:].strip(),
-                }
-                return
+    start_dt  = datetime.now()
+    log_name  = f"pipeline_{start_dt.strftime('%Y-%m-%d_%H%M%S')}.log"
+    log_path  = LOGS_DIR / log_name
+    pipeline_start = time.monotonic()
 
-        # Copy freshly generated CSVs into the dashboard's public/data/
-        DASHBOARD_DATA.mkdir(parents=True, exist_ok=True)
-        for csv_file in DASHBOARD_OUT_DIR.glob("*.csv"):
-            shutil.copy2(csv_file, DASHBOARD_DATA / csv_file.name)
+    with open(log_path, "w", encoding="utf-8") as lf:
+        # ── Header ──
+        lf.write("=" * 60 + "\n")
+        lf.write("  KPI ANOMALY DETECTION PIPELINE\n")
+        lf.write(f"  Started: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        lf.write("=" * 60 + "\n\n")
+        lf.flush()
 
-        _pipeline_status = {"state": "done", "step": None, "error": None}
+        try:
+            for layer in PIPELINE_LAYERS:
+                layer_name    = layer["name"]
+                layer_scripts = layer["scripts"]
+                layer_start   = time.monotonic()
 
-    except Exception as exc:
-        _pipeline_status = {
-            "state": "error",
-            "step": _pipeline_status.get("step"),
-            "error": str(exc),
-        }
+                _log(lf, f"{'─' * 50}")
+                _log(lf, f"  {layer_name} — STARTED")
+                _log(lf, f"{'─' * 50}")
+
+                for script_path in layer_scripts:
+                    script_name = script_path.name
+                    _pipeline_status["step"] = script_name
+                    _log(lf, f"  Running: {script_name}")
+                    script_start = time.monotonic()
+
+                    result = await asyncio.to_thread(
+                        subprocess.run,
+                        [sys.executable, str(script_path)],
+                        capture_output=True,
+                        text=True,
+                        cwd=str(BASE_DIR),
+                    )
+
+                    elapsed = time.monotonic() - script_start
+
+                    if result.returncode != 0:
+                        _log(lf, f"  ERROR: {script_name} (after {elapsed:.1f}s)")
+                        lf.write("\n--- STDOUT ---\n")
+                        lf.write(result.stdout or "(empty)\n")
+                        lf.write("--- STDERR ---\n")
+                        lf.write(result.stderr or "(empty)\n")
+                        lf.write("-" * 40 + "\n\n")
+
+                        error_tail = (result.stderr or result.stdout)[-600:].strip()
+                        _log(lf, f"  PIPELINE FAILED at {script_name}")
+                        lf.write("\n" + "=" * 60 + "\n")
+                        lf.write(f"  PIPELINE FAILED\n")
+                        lf.write(f"  Failed script : {script_name}\n")
+                        lf.write(f"  Layer         : {layer_name}\n")
+                        lf.write(f"  Timestamp     : {_ts()}\n")
+                        lf.write("=" * 60 + "\n")
+                        lf.flush()
+
+                        _pipeline_status = {
+                            "state": "error",
+                            "step":  script_name,
+                            "error": error_tail,
+                        }
+                        return
+
+                    _log(lf, f"  DONE:  {script_name} ({elapsed:.1f}s)")
+
+                    # Log any warnings / info lines from stdout even on success
+                    warn_lines = [
+                        line for line in (result.stdout or "").splitlines()
+                        if any(tag in line.upper() for tag in ("[WARN]", "WARNING", "  INFO ", "FAIL"))
+                    ]
+                    if warn_lines:
+                        lf.write(f"  [notices from {script_name}]\n")
+                        for wl in warn_lines:
+                            lf.write(f"    {wl}\n")
+                        lf.flush()
+
+                    # Log stderr even on success (captures Python warnings, deprecations)
+                    if result.stderr and result.stderr.strip():
+                        lf.write(f"  [stderr from {script_name}]\n")
+                        for line in result.stderr.strip().splitlines():
+                            lf.write(f"    {line}\n")
+                        lf.flush()
+
+                layer_elapsed = time.monotonic() - layer_start
+                _log(lf, f"{'─' * 50}")
+                _log(lf, f"  {layer_name} — COMPLETE ({layer_elapsed:.1f}s)")
+                _log(lf, f"{'─' * 50}\n")
+
+            # ── Footer ──
+            total = time.monotonic() - pipeline_start
+            mins, secs = divmod(int(total), 60)
+            lf.write("=" * 60 + "\n")
+            lf.write("  PIPELINE COMPLETE\n")
+            lf.write(f"  Finished  : {_ts()}\n")
+            lf.write(f"  Duration  : {mins}m {secs}s\n")
+            lf.write(f"  Log file  : {log_name}\n")
+            lf.write("=" * 60 + "\n")
+            lf.flush()
+
+            _pipeline_status = {"state": "done", "step": None, "error": None}
+
+        except Exception as exc:
+            _log(lf, f"UNEXPECTED ERROR: {exc}")
+            _pipeline_status = {
+                "state": "error",
+                "step":  _pipeline_status.get("step"),
+                "error": str(exc),
+            }
