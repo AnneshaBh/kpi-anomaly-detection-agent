@@ -1,0 +1,123 @@
+============================================================
+  KPI ANOMALY DETECTION AGENT — RUN LOCALLY
+============================================================
+
+REQUIREMENTS
+------------
+- Python 3.10 or higher
+- Node.js 18 or higher
+- Git
+
+
+------------------------------------------------------------
+STEP 1 — Add your API Key
+------------------------------------------------------------
+Open the file called ".env" in the root folder.
+Add this line (replace with your actual key):
+
+  ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+Note: If you don't have a key or have no credits,
+the pipeline still works — it just uses fallback text
+instead of AI-generated recommendations.
+
+
+------------------------------------------------------------
+STEP 2 — Install Python packages
+------------------------------------------------------------
+Open a terminal in the root folder and run:
+
+  pip install fastapi uvicorn python-dotenv pandas numpy scipy scikit-learn prophet networkx anthropic statsmodels
+
+
+------------------------------------------------------------
+STEP 3 — Install frontend packages
+------------------------------------------------------------
+In the same terminal, run:
+
+  cd kpi-anomaly-dashboard
+  npm install
+  cd ..
+
+
+------------------------------------------------------------
+STEP 4 — Start the backend (Terminal 1)
+------------------------------------------------------------
+In the root folder, run:
+
+  uvicorn api.server:app --reload --port 8000
+
+You should see:
+  INFO: Uvicorn running on http://127.0.0.1:8000
+
+Keep this terminal open.
+
+
+------------------------------------------------------------
+STEP 5 — Start the frontend (Terminal 2 — open a new terminal)
+------------------------------------------------------------
+Go into the dashboard folder and run:
+
+  cd kpi-anomaly-dashboard
+  npm run dev
+
+You should see:
+  VITE ready on http://localhost:3000
+
+Keep this terminal open too.
+
+
+------------------------------------------------------------
+STEP 6 — Open in browser
+------------------------------------------------------------
+Go to:  http://localhost:3000
+
+Login with:
+  Username : admin
+  Password : admin123
+
+
+------------------------------------------------------------
+STEP 7 — Run the pipeline
+------------------------------------------------------------
+Click the "Refresh Pipeline" button in the top right.
+
+First run takes about 3-4 minutes.
+You can watch the progress in the logs/ folder —
+a new file is created for each run (e.g. pipeline_2024-08-20_103045.log).
+
+
+------------------------------------------------------------
+SUMMARY — Two terminals must always be running
+------------------------------------------------------------
+
+  Terminal 1 (backend) : uvicorn api.server:app --reload --port 8000
+  Terminal 2 (frontend): cd kpi-anomaly-dashboard && npm run dev
+
+Both must be running at the same time for the app to work.
+
+
+------------------------------------------------------------
+TROUBLESHOOTING
+------------------------------------------------------------
+
+Problem : "Module not found" error when running pipeline
+Fix     : Run Step 2 again (pip install ...)
+
+Problem : Port 8000 already in use
+Fix     : Change port — 
+          uvicorn api.server:app --reload --port 8001
+          
+          Then update kpi-anomaly-dashboard/vite.config.js:
+          proxy: { '/api': 'http://localhost:8001' }
+
+Problem : Login not working
+Fix     : Check kpi-anomaly-dashboard/.env file has these two lines:
+          VITE_AUTH_USERNAME=admin
+          VITE_AUTH_PASSWORD=admin123
+
+Problem : Pipeline button shows error
+Fix     : Make sure Terminal 1 (uvicorn) is running
+          Check the logs/ folder for the error details
+
+============================================================
