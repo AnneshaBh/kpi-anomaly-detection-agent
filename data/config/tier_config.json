@@ -20,6 +20,7 @@
       "kpi_metadata": {
         "total_revenue_usd": {
           "tier": 1,
+          "positive_is_good": true,
           "historical_watch_days": 126,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -27,6 +28,7 @@
         },
         "n_orders": {
           "tier": 1,
+          "positive_is_good": true,
           "historical_watch_days": 111,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -34,6 +36,7 @@
         },
         "avg_roas": {
           "tier": 1,
+          "positive_is_good": true,
           "historical_watch_days": 70,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -41,6 +44,7 @@
         },
         "conversion_rate": {
           "tier": 1,
+          "positive_is_good": true,
           "historical_watch_days": 122,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -65,6 +69,7 @@
       "kpi_metadata": {
         "return_rate": {
           "tier": 2,
+          "positive_is_good": false,
           "historical_watch_days": 96,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -72,6 +77,7 @@
         },
         "n_stockouts": {
           "tier": 2,
+          "positive_is_good": false,
           "historical_watch_days": 17,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -79,6 +85,7 @@
         },
         "avg_order_value_usd": {
           "tier": 2,
+          "positive_is_good": true,
           "historical_watch_days": 157,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -86,6 +93,7 @@
         },
         "bounce_rate": {
           "tier": 2,
+          "positive_is_good": false,
           "historical_watch_days": 81,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -110,6 +118,7 @@
       "kpi_metadata": {
         "total_clicks": {
           "tier": 3,
+          "positive_is_good": true,
           "historical_watch_days": 72,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -117,6 +126,7 @@
         },
         "sessions": {
           "tier": 3,
+          "positive_is_good": true,
           "historical_watch_days": 138,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -124,6 +134,7 @@
         },
         "inventory_health": {
           "tier": 3,
+          "positive_is_good": true,
           "historical_watch_days": 132,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,
@@ -131,6 +142,7 @@
         },
         "avg_discount_pct": {
           "tier": 3,
+          "positive_is_good": false,
           "historical_watch_days": 75,
           "historical_anomaly_days": 0,
           "historical_severe_days": 0,

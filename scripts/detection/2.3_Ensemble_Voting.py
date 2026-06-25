@@ -1,16 +1,16 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 2.3_Ensemble_Voting.py
 
-Step 2.3 â€” Ensemble Voting and Ground-Truth Evaluation.
+Step 2.3 --" Ensemble Voting and Ground-Truth Evaluation.
 
 Combines the flags from all three detection methods into a single confirmed
 anomaly signal and produces the final anomaly_results dataset for Layer 3.
 
 Join architecture:
-    Base   : Method A  (8,772 rows â€” 12 KPIs x 731 days)
-    + join : Method B  (731 rows â€” day-level; broadcast to every KPI on that date)
-    + join : Method C  (2,924 rows â€” Tier 1 KPIs only; False for Tier 2 / 3)
+    Base   : Method A  (8,772 rows --" 12 KPIs x 731 days)
+    + join : Method B  (731 rows --" day-level; broadcast to every KPI on that date)
+    + join : Method C  (2,924 rows --" Tier 1 KPIs only; False for Tier 2 / 3)
 
 Voting:
     votes = method_a_flag + method_b_flag + method_c_flag
@@ -20,9 +20,9 @@ Methods available per tier:
     Tier 1  total_revenue_usd, n_orders, avg_roas, conversion_rate
             A + B + C  (max 3 votes)
     Tier 2  return_rate, n_stockouts, avg_order_value_usd, bounce_rate
-            A + B      (max 2 votes â€” C does not cover Tier 2)
+            A + B      (max 2 votes --" C does not cover Tier 2)
     Tier 3  total_clicks, sessions, inventory_health, avg_discount_pct
-            A + B      (max 2 votes â€” C does not cover Tier 3)
+            A + B      (max 2 votes --" C does not cover Tier 3)
 
 Severity:
     HIGH    Tier 1: all 3 methods agree (votes == 3)
@@ -49,9 +49,9 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Paths
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 BASE         = Path(__file__).parent.parent.parent
 DATA         = BASE / "data"
@@ -61,6 +61,7 @@ METHOD_C_CSV = DATA / "detection/method_c_results.csv"
 OUTPUT_CSV   = DATA / "detection/anomaly_results.csv"
 MATRIX_CSV   = DATA / "detection/ensemble_voting_matrix.csv"
 OUTPUT_DB    = DATA / "db/kpi_anomaly_detection.db"
+TIER_JSON    = DATA / "config/tier_config.json"
 
 KPI_CODES = {
     "total_revenue_usd":    "REV",
@@ -94,9 +95,26 @@ INDIVIDUAL_RESULTS = {
     "Method C (Prophet)":      {"flagged": 47,  "tp": 8,  "fp": 39,  "fn": 12},
 }
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# -----------------------------------------------------------------------------
+# Tier config helpers
+# -----------------------------------------------------------------------------
+
+def load_tier_config() -> dict:
+    with open(TIER_JSON, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_pig_map(tier_cfg: dict) -> dict:
+    """Return {kpi: positive_is_good (bool)} for all tiered KPIs."""
+    pig_map = {}
+    for tier_data in tier_cfg["tiers"].values():
+        for kpi, meta in tier_data["kpi_metadata"].items():
+            pig_map[kpi] = meta["positive_is_good"]
+    return pig_map
+
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Load & build ensemble matrix
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 def load_methods():
     a = pd.read_csv(METHOD_A_CSV, parse_dates=["date"])
@@ -112,7 +130,7 @@ def build_matrix(a: pd.DataFrame,
     Join all three method results into a single 8,772-row matrix.
     One row per (date, kpi) pair across all 12 tiered KPIs x 731 days.
     """
-    # Base: Method A â€” keep the columns needed for output
+    # Base: Method A --" keep the columns needed for output
     base = a[[
         "date", "kpi", "tier",
         "actual_value", "rolling_mean", "z_score",
@@ -122,14 +140,14 @@ def build_matrix(a: pd.DataFrame,
         "anomaly_flag", "anomaly_event", "anomaly_kpi",
     ]].copy()
 
-    # Method B: day-level â€” merge on date, broadcast to all KPIs
+    # Method B: day-level --" merge on date, broadcast to all KPIs
     b_slim = b[["date", "method_b_flag", "method_b_score",
                  "top_5_features"]].copy()
     base = base.merge(b_slim, on="date", how="left")
     base["method_b_flag"] = base["method_b_flag"].fillna(False)
     base["method_b_score"] = base["method_b_score"].fillna(np.nan)
 
-    # Method C: per-KPI, Tier 1 only â€” merge on date + kpi
+    # Method C: per-KPI, Tier 1 only --" merge on date + kpi
     c_slim = c[["date", "kpi", "method_c_flag",
                  "yhat", "yhat_lower", "yhat_upper"]].copy()
     base = base.merge(c_slim, on=["date", "kpi"], how="left")
@@ -138,9 +156,9 @@ def build_matrix(a: pd.DataFrame,
     return base
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Voting & severity
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 def assign_severity(tier: int, votes: int) -> str:
     if tier == 1:
@@ -188,9 +206,47 @@ def add_votes(matrix: pd.DataFrame) -> pd.DataFrame:
 
     return m
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
+# Direction filter
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
+
+def apply_direction_filter(matrix: pd.DataFrame, pig_map: dict) -> pd.DataFrame:
+    """
+    Suppress vote-confirmed anomalies whose direction is not the actionable
+    direction for that KPI, based on positive_is_good from tier_config.json.
+
+        positive_is_good = True  ->  UP is growth (suppress); DOWN is the problem
+        positive_is_good = False ->  UP is the problem; DOWN is improvement (suppress)
+
+    Adds two audit columns to every row:
+        direction_suppressed         bool
+        direction_suppression_reason str  (empty when not suppressed)
+
+    The confirmed column is NOT modified here; callers filter on
+    confirmed & ~direction_suppressed so the voting record stays intact.
+    """
+    m = matrix.copy()
+
+    def _check(row):
+        if not row["confirmed"]:
+            return False, ""
+        pig       = pig_map.get(row["kpi"], True)
+        direction = row["direction"]
+        if pig and direction == "UP":
+            return True, "directionally_invalid: UP change on positive_is_good KPI"
+        if not pig and direction == "DOWN":
+            return True, "directionally_invalid: DOWN change on inverse KPI"
+        return False, ""
+
+    result = m.apply(_check, axis=1, result_type="expand")
+    m["direction_suppressed"]         = result[0]
+    m["direction_suppression_reason"] = result[1]
+    return m
+
+
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Evaluation
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 def evaluate(matrix: pd.DataFrame) -> dict:
     """Day-level precision / recall / F1 for the ensemble."""
@@ -229,9 +285,9 @@ def evaluate(matrix: pd.DataFrame) -> dict:
         "missed": missed,
     }
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Print summary
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 def print_summary(matrix: pd.DataFrame,
                   confirmed: pd.DataFrame,
@@ -254,23 +310,46 @@ def print_summary(matrix: pd.DataFrame,
           f"Tier 2/3: A+B only (max 2 votes, C covers Tier 1 only)")
     print()
 
-    # â”€â”€ Vote distribution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # " -- " Vote distribution " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
     print("-" * W)
     print("  Vote Distribution  (8,772 KPI-day pairs)")
     print("-" * W)
     vote_counts = matrix["votes"].value_counts().sort_index()
     for v, cnt in vote_counts.items():
         tag = {
-            0: "NORMAL     â€” no detection",
-            1: "WATCH      â€” 1 method flagged, not confirmed",
-            2: "CONFIRMED  â€” 2 methods agree",
-            3: "CONFIRMED  â€” all 3 methods agree (Tier 1 only)",
+            0: "NORMAL     -- no detection",
+            1: "WATCH      -- 1 method flagged, not confirmed",
+            2: "CONFIRMED  -- 2 methods agree",
+            3: "CONFIRMED  -- all 3 methods agree (Tier 1 only)",
         }.get(v, "")
         bar = "#" * int(cnt / total_kpi_days * 50)
         print(f"  votes={v}  {cnt:>5} ({cnt/total_kpi_days*100:5.1f}%)  {tag:<48}  {bar}")
     print()
 
-    # â”€â”€ Per-tier vote breakdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # " -- " Direction filter summary " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
+    print("-" * W)
+    print("  Direction Filter  (positive_is_good from tier_config.json)")
+    print("-" * W)
+    n_vote_confirmed  = int(matrix["confirmed"].sum())
+    n_dir_suppressed  = int(
+        (matrix["confirmed"] & matrix["direction_suppressed"]).sum()
+    ) if "direction_suppressed" in matrix.columns else 0
+    n_final_confirmed = n_confirmed
+    print(f"  Vote-confirmed       : {n_vote_confirmed:>4} KPI-day pairs")
+    print(f"  Direction-suppressed : {n_dir_suppressed:>4}  "
+          f"(UP on positive_is_good KPI  |  DOWN on inverse KPI)")
+    print(f"  Final confirmed      : {n_final_confirmed:>4}  -> written to anomaly_results.csv")
+
+    if "direction_suppressed" in matrix.columns and n_dir_suppressed > 0:
+        sup = matrix[matrix["confirmed"] & matrix["direction_suppressed"]]
+        by_kpi = sup.groupby(["kpi", "direction_suppression_reason"]).size()
+        print()
+        print("  Suppressed breakdown by KPI:")
+        for (kpi, reason), count in by_kpi.items():
+            print(f"    {kpi:<28}  {count:>3}  ({reason})")
+    print()
+
+    # " -- " Per-tier vote breakdown " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
     print("-" * W)
     print("  Confirmed Anomalies by Tier and Severity")
     print("-" * W)
@@ -279,12 +358,12 @@ def print_summary(matrix: pd.DataFrame,
         t_all  = matrix[matrix["tier"] == tier_num]
         sevs   = t_conf["severity"].value_counts().to_dict() if len(t_conf) > 0 else {}
         sev_str = "  ".join(f"{s}: {n}" for s, n in sorted(sevs.items()))
-        print(f"  Tier {tier_num}  â€”  {len(t_conf):>3} confirmed KPI-day pairs "
+        print(f"  Tier {tier_num}  --  {len(t_conf):>3} confirmed KPI-day pairs "
               f"across {t_conf['date'].nunique() if len(t_conf)>0 else 0} unique dates  |  "
               f"{sev_str if sev_str else 'none'}")
     print()
 
-    # â”€â”€ Confirmed anomalies table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # " -- " Confirmed anomalies table " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
     print("-" * W)
     print(f"  All Confirmed Anomalies  "
           f"({n_confirmed} KPI-day records  |  {n_unique_dates} unique dates)")
@@ -315,7 +394,7 @@ def print_summary(matrix: pd.DataFrame,
 
     print()
 
-    # â”€â”€ Ground-truth evaluation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # " -- " Ground-truth evaluation " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
     print("-" * W)
     print(f"  Ground-Truth Evaluation  "
           f"({metrics['total_anomaly_days']} labeled anomaly days  vs  "
@@ -350,9 +429,9 @@ def print_summary(matrix: pd.DataFrame,
             d = pd.Timestamp(row["date"]).strftime("%Y-%m-%d")
             print(f"    [-]  {d}  |  {str(row['anomaly_event']):<35}  "
                   f"(target: {row['anomaly_kpi']})  "
-                  f"â€” only Method A detected; B and C both missed")
+                  f"-- only Method A detected; B and C both missed")
 
-    # â”€â”€ Method comparison â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # " -- " Method comparison " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
     print()
     print("-" * W)
     print("  Method Comparison  (day-level precision / recall / F1  |  20 ground-truth anomaly days)")
@@ -382,9 +461,9 @@ def print_summary(matrix: pd.DataFrame,
     print("=" * W)
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Write outputs
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 def write_outputs(confirmed: pd.DataFrame,
                   matrix: pd.DataFrame) -> None:
@@ -414,7 +493,7 @@ def write_outputs(confirmed: pd.DataFrame,
     matrix_out.to_csv(MATRIX_CSV, index=False)
     print(f"  Matrix CSV     ->  {MATRIX_CSV.relative_to(BASE)}")
     print(f"  Shape          :   {matrix_out.shape[0]:,} rows x {matrix_out.shape[1]} cols "
-          f"(full voting record â€” all 8,772 KPI-day pairs)")
+          f"(full voting record -- all 8,772 KPI-day pairs)")
 
     conn = sqlite3.connect(OUTPUT_DB)
     conf_out.to_sql("anomaly_results",          conn, if_exists="replace", index=False)
@@ -424,9 +503,9 @@ def write_outputs(confirmed: pd.DataFrame,
     print(f"                     tables: anomaly_results, ensemble_voting_matrix")
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 # Main
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "
 
 def main() -> None:
     print()
@@ -444,9 +523,18 @@ def main() -> None:
     matrix = build_matrix(a, b, c)
     matrix = add_votes(matrix)
 
-    confirmed = matrix[matrix["confirmed"]].copy()
+    print("  Applying direction filter ...")
+    pig_map = build_pig_map(load_tier_config())
+    matrix  = apply_direction_filter(matrix, pig_map)
 
-    print(f"  Confirmed anomalies : {len(confirmed)} KPI-day records  "
+    n_vote_confirmed = int(matrix["confirmed"].sum())
+    n_dir_suppressed = int((matrix["confirmed"] & matrix["direction_suppressed"]).sum())
+    confirmed = matrix[matrix["confirmed"] & ~matrix["direction_suppressed"]].copy()
+
+    print(f"  Vote-confirmed       : {n_vote_confirmed} KPI-day records")
+    print(f"  Direction-suppressed : {n_dir_suppressed} "
+          f"(UP on positive_is_good KPI | DOWN on inverse KPI)")
+    print(f"  Confirmed anomalies  : {len(confirmed)} KPI-day records  "
           f"({confirmed['date'].nunique()} unique dates)")
     print()
 

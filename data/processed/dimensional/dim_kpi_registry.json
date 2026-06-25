@@ -1,0 +1,257 @@
+{
+  "total_revenue_usd": [
+    {
+      "file": "dim_customer.csv",
+      "dimension_names": [
+        "segment",
+        "country",
+        "age_group",
+        "loyalty_status",
+        "cohort_year"
+      ]
+    },
+    {
+      "file": "dim_product_orders.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "n_orders": [
+    {
+      "file": "dim_customer.csv",
+      "dimension_names": [
+        "segment",
+        "country",
+        "age_group",
+        "loyalty_status",
+        "cohort_year"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "avg_order_value_usd": [
+    {
+      "file": "dim_customer.csv",
+      "dimension_names": [
+        "segment",
+        "country",
+        "loyalty_status"
+      ]
+    },
+    {
+      "file": "dim_product_orders.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "n_unique_customers": [
+    {
+      "file": "dim_customer.csv",
+      "dimension_names": [
+        "segment",
+        "country",
+        "age_group",
+        "loyalty_status",
+        "cohort_year"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "n_returns": [
+    {
+      "file": "dim_customer.csv",
+      "dimension_names": [
+        "segment",
+        "country",
+        "loyalty_status"
+      ]
+    },
+    {
+      "file": "dim_product_orders.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "return_rate": [
+    {
+      "file": "dim_customer.csv",
+      "dimension_names": [
+        "segment",
+        "country",
+        "loyalty_status"
+      ]
+    },
+    {
+      "file": "dim_product_orders.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "avg_discount_pct": [
+    {
+      "file": "dim_product_orders.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    },
+    {
+      "file": "dim_order_channel.csv",
+      "dimension_names": [
+        "order_channel"
+      ]
+    }
+  ],
+  "total_units_sold": [
+    {
+      "file": "dim_product_inventory.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    }
+  ],
+  "n_stockouts": [
+    {
+      "file": "dim_product_inventory.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    }
+  ],
+  "n_reorders": [
+    {
+      "file": "dim_product_inventory.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    }
+  ],
+  "total_stock_on_hand": [
+    {
+      "file": "dim_product_inventory.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    }
+  ],
+  "inventory_health": [
+    {
+      "file": "dim_product_inventory.csv",
+      "dimension_names": [
+        "category",
+        "brand",
+        "product_tier"
+      ]
+    }
+  ],
+  "avg_roas": [
+    {
+      "file": "dim_marketing_channel.csv",
+      "dimension_names": [
+        "marketing_channel"
+      ]
+    }
+  ],
+  "total_spend_usd": [
+    {
+      "file": "dim_marketing_channel.csv",
+      "dimension_names": [
+        "marketing_channel"
+      ]
+    }
+  ],
+  "total_impressions": [
+    {
+      "file": "dim_marketing_channel.csv",
+      "dimension_names": [
+        "marketing_channel"
+      ]
+    }
+  ],
+  "total_clicks": [
+    {
+      "file": "dim_marketing_channel.csv",
+      "dimension_names": [
+        "marketing_channel"
+      ]
+    }
+  ],
+  "total_conversions_marketing": [
+    {
+      "file": "dim_marketing_channel.csv",
+      "dimension_names": [
+        "marketing_channel"
+      ]
+    }
+  ],
+  "total_attributed_revenue_usd": [
+    {
+      "file": "dim_marketing_channel.csv",
+      "dimension_names": [
+        "marketing_channel"
+      ]
+    }
+  ],
+  "sessions": [],
+  "unique_visitors": [],
+  "bounce_rate": [],
+  "conversion_rate": [],
+  "avg_session_duration_sec": [],
+  "pages_per_session": [],
+  "conversions_web": []
+}
