@@ -109,7 +109,7 @@ def build_pig_map(tier_cfg: dict) -> dict:
     pig_map = {}
     for tier_data in tier_cfg["tiers"].values():
         for kpi, meta in tier_data["kpi_metadata"].items():
-            pig_map[kpi] = meta["positive_is_good"]
+            pig_map[kpi] = meta.get("positive_is_good", True)
     return pig_map
 
 # " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- " -- "

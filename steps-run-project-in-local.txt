@@ -27,7 +27,7 @@ STEP 2 — Install Python packages
 ------------------------------------------------------------
 Open a terminal in the root folder and run:
 
-  pip install fastapi uvicorn python-dotenv pandas numpy scipy scikit-learn prophet networkx anthropic statsmodels
+  python -m pip install fastapi uvicorn python-dotenv pandas numpy scipy scikit-learn prophet networkx anthropic statsmodels pycausalimpact dowhy
 
 
 ------------------------------------------------------------
