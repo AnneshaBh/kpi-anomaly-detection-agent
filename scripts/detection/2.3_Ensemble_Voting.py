@@ -529,10 +529,15 @@ def main() -> None:
 
     n_vote_confirmed = int(matrix["confirmed"].sum())
     n_dir_suppressed = int((matrix["confirmed"] & matrix["direction_suppressed"]).sum())
-    confirmed = matrix[matrix["confirmed"] & ~matrix["direction_suppressed"]].copy()
+    # direction_suppressed is kept as audit metadata only (see apply_direction_filter);
+    # it must NOT remove rows from the confirmed output. Removing it here previously
+    # deleted all UP-direction anomalies on positive_is_good KPIs (e.g. Black Friday
+    # revenue spikes), which contradicts Layer 3's "UP is never suppressed" design
+    # (see 3.3_external_drivers.py) and broke the Captured Upside dashboard metric.
+    confirmed = matrix[matrix["confirmed"]].copy()
 
     print(f"  Vote-confirmed       : {n_vote_confirmed} KPI-day records")
-    print(f"  Direction-suppressed : {n_dir_suppressed} "
+    print(f"  Direction flag (info-only, not suppressed): {n_dir_suppressed} "
           f"(UP on positive_is_good KPI | DOWN on inverse KPI)")
     print(f"  Confirmed anomalies  : {len(confirmed)} KPI-day records  "
           f"({confirmed['date'].nunique()} unique dates)")
