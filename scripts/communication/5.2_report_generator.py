@@ -191,24 +191,32 @@ def build_executive_summary(df):
         "",
     ]
 
-    # ── Section 3: Top 15 — Immediate Escalation ──────────────────────────────
+    # ── Section 3: Top ESCALATE Anomalies — Immediate Escalation ─────────────
     L += [
-        "## 3. Top 15 Anomalies — Immediate Escalation Required",
+        f"## 3. Top {n_esc} Anomalies — Immediate Escalation Required",
         "",
-        "_All 15 ESCALATE anomalies are HIGH-severity positive deviations. "
-        "Captured upside exceeds downside risk. Priority is to sustain and capitalise on these surges._",
-        "",
-        "| Rank | Date | KPI | Movement | Revenue Impact | Owner | Effort |",
-        "|------|------|-----|----------|----------------|-------|--------|",
     ]
-
-    for _, r in esc_rows.iterrows():
-        L.append(
-            f"| #{int(r['priority_rank'])} | {pd.Timestamp(r['date']).strftime('%Y-%m-%d')} "
-            f"| {_kpi_label(r['kpi'])} | {_fmt_dev(r['direction'], r['deviation_pct'])} "
-            f"| {_fmt_rev(r['revenue_at_risk'])} | {_safe(r['recommended_owner'])} "
-            f"| {_effort(r['effort_level'])} |"
-        )
+    if n_esc > 0:
+        L += [
+            "_These are bad-direction anomalies that are HIGH severity and not "
+            "explained by an external factor -- genuine, actionable problems._",
+            "",
+            "| Rank | Date | KPI | Movement | Revenue Impact | Owner | Effort |",
+            "|------|------|-----|----------|----------------|-------|--------|",
+        ]
+        for _, r in esc_rows.iterrows():
+            L.append(
+                f"| #{int(r['priority_rank'])} | {pd.Timestamp(r['date']).strftime('%Y-%m-%d')} "
+                f"| {_kpi_label(r['kpi'])} | {_fmt_dev(r['direction'], r['deviation_pct'])} "
+                f"| {_fmt_rev(r['revenue_at_risk'])} | {_safe(r['recommended_owner'])} "
+                f"| {_effort(r['effort_level'])} |"
+            )
+    else:
+        L += [
+            "_No anomalies currently require immediate escalation. Positive-direction "
+            "changes (e.g. revenue spikes) are shown in Section 4 as captured upside, "
+            "not as alerts -- good news never escalates._",
+        ]
 
     L += ["", "---", ""]
 
@@ -248,12 +256,16 @@ def build_executive_summary(df):
     L += ["", "---", ""]
 
     # ── Section 6: Recommended Next Steps ─────────────────────────────────────
+    step1 = (
+        f"1. **Immediate (today):** Review all {n_esc} ESCALATE anomalies in the Operations Digest -- "
+        "these are genuine, unexplained problems that need attention now."
+        if n_esc > 0 else
+        "1. **Immediate (today):** None -- no anomalies currently require immediate escalation."
+    )
     L += [
         "## 6. Recommended Next Steps",
         "",
-        f"1. **Immediate (today):** Review all {n_esc} ESCALATE anomalies in the Operations Digest. "
-        "Focus on sustaining the revenue surges in Total Revenue and Order Volume — "
-        "verify inventory and fulfilment capacity is not a bottleneck.",
+        step1,
         "",
         f"2. **Daily (this week):** Operations and Performance Marketing to work through the "
         f"{n_inv} INVESTIGATE anomalies, starting with the highest-ranked. "

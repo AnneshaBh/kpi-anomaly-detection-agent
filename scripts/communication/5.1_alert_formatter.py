@@ -111,6 +111,8 @@ def _build_subject(row):
     movement = _fmt_movement(row["direction"], row["deviation_pct"])
 
     if flag == "SUPPRESSED":
+        if row.get("good_direction_change", False):
+            return f"[SUPPRESSED] {kpi_lbl} {movement} — Positive change, no alert needed | {date_str}"
         ext = _safe(row["external_driver_type"], "External Factor")
         return f"[SUPPRESSED] {kpi_lbl} {movement} — External: {ext} | {date_str}"
 
@@ -189,6 +191,10 @@ def _body_monitor(row):
 def _body_suppressed(row):
     movement = _fmt_movement(row["direction"], row["deviation_pct"])
     date_str = pd.Timestamp(row["date"]).strftime("%Y-%m-%d")
+    if row.get("good_direction_change", False):
+        closing = "This anomaly is a positive/expected change and is not a problem."
+    else:
+        closing = "This anomaly has been automatically suppressed due to external market conditions."
 
     return "\n".join([
         f"SUPPRESSED — NO ACTION REQUIRED — {date_str}",
@@ -201,7 +207,7 @@ def _body_suppressed(row):
         "ROOT CAUSE",
         _safe(row["rca_narrative"]),
         "",
-        "This anomaly has been automatically suppressed due to external market conditions.",
+        closing,
         "No escalation or investigation is warranted at this time.",
     ])
 
@@ -250,8 +256,8 @@ def check(label, condition, detail=""):
 
 # T01 — Shape
 check(
-    "T01  Shape (n, 73)",
-    df.shape[0] > 0 and df.shape[1] == 73,
+    "T01  Shape (n, 74)",
+    df.shape[0] > 0 and df.shape[1] == 74,
     f"got {df.shape}",
 )
 
@@ -279,12 +285,12 @@ check(
     f"{bad_fmt} malformed",
 )
 
-# T05 — ESCALATE routing
+# T05 — ESCALATE routing (can legitimately be empty -- good-direction
+# anomalies never escalate now, regardless of severity)
 esc = df[df["layer4_priority_flag"] == "ESCALATE"]
 check(
-    "T05  ESCALATE: 15 rows | audience='Executive, Operations' | urgency='Immediate'",
-    len(esc) > 0
-    and (esc["audience"] == "Executive, Operations").all()
+    "T05  ESCALATE: audience='Executive, Operations' | urgency='Immediate'",
+    (esc["audience"] == "Executive, Operations").all()
     and (esc["delivery_channel"] == "Slack + Email").all()
     and (esc["urgency_label"] == "Immediate").all(),
     f"n={len(esc)}",
@@ -331,13 +337,13 @@ check(
     f"missing in {(~sup['alert_body'].str.contains('NO ACTION REQUIRED')).sum()} rows",
 )
 
-# T10 — Black Friday spot-check: rank #1 ESCALATE row
+# T10 — Black Friday spot-check: positive change -> SUPPRESSED, no alert
 bf = df[df["anomaly_id"] == "ANO-20241129-REV"]
 check(
-    "T10  ANO-20241129-REV subject starts '[ESCALATE]' and contains 'Priority #1'",
+    "T10  ANO-20241129-REV subject starts '[SUPPRESSED]' (positive change, no alert)",
     len(bf) == 1
-    and bf.iloc[0]["alert_subject"].startswith("[ESCALATE]")
-    and "Priority #1" in bf.iloc[0]["alert_subject"],
+    and bf.iloc[0]["alert_subject"].startswith("[SUPPRESSED]")
+    and bf.iloc[0]["layer4_priority_flag"] == "SUPPRESSED",
     f"subject={bf.iloc[0]['alert_subject'] if len(bf) else 'n/a'}",
 )
 
@@ -404,10 +410,14 @@ for flag in ["ESCALATE", "INVESTIGATE", "MONITOR", "SUPPRESSED"]:
 
 print("\nSample alert subjects by routing flag:")
 for flag in ["ESCALATE", "INVESTIGATE", "MONITOR", "SUPPRESSED"]:
-    sample = df[df["layer4_priority_flag"] == flag].iloc[0]
+    flag_rows = df[df["layer4_priority_flag"] == flag]
     print(f"\n  [{flag}]")
+    if len(flag_rows) == 0:
+        print("  (none)")
+        continue
+    sample = flag_rows.iloc[0]
     print(f"  Subject : {sample['alert_subject']}")
 
 print()
-print("Step 5.1 complete — alert_payloads.csv written (181 rows x 73 cols).")
+print("Step 5.1 complete — alert_payloads.csv written (181 rows x 74 cols).")
 print("Ready for Step 5.2 (Report Generator).")

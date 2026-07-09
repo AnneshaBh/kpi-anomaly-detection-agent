@@ -5,7 +5,7 @@ priority score (0–1), a priority band (HIGH / MEDIUM / LOW), and a priority
 rank (1 = most urgent) for downstream alert routing.
 
 Input  : data/impact_results.csv       (181 × 51)
-Output : data/priority_results.csv     (181 × 59)
+Output : data/priority_results.csv     (181 × 60)
          SQLite table: priority_results
 
 Factor weights (from architecture spec):
@@ -64,7 +64,7 @@ MEDIUM_THRESHOLD = 0.50
 # ─── Load ────────────────────────────────────────────────────────────────────
 print("Loading impact_results.csv …")
 df = pd.read_csv(INPUT_CSV, parse_dates=["date"])
-assert df.shape[0] > 0 and df.shape[1] == 51, f"Expected 51 cols, got {df.shape}"
+assert df.shape[0] > 0 and df.shape[1] == 52, f"Expected 52 cols, got {df.shape}"
 
 
 # ─── Factor 1 — Revenue impact (log-scaled, normalised to [0, 1]) ─────────────
@@ -139,7 +139,7 @@ out["priority_score"]         = priority_score
 out["priority_band"]          = priority_band
 out["priority_rank"]          = priority_rank
 
-assert out.shape[0] > 0 and out.shape[1] == 59, f"Expected 59 cols, got {out.shape}"
+assert out.shape[0] > 0 and out.shape[1] == 60, f"Expected 60 cols, got {out.shape}"
 assert out["priority_score"].between(0, 1).all(), "priority_score out of [0, 1]"
 assert out["priority_rank"].nunique() == len(out), "priority_rank contains duplicates"
 assert set(out["priority_band"].unique()).issubset({"HIGH", "MEDIUM", "LOW"})
@@ -240,4 +240,4 @@ print(f"  Suppressed anomalies : ranks {sup['priority_rank'].tolist()}  "
       f"bands={sup['priority_band'].tolist()}")
 
 print()
-print("Step 4.2 complete — priority_results.csv written (181 rows × 59 cols).")
+print("Step 4.2 complete — priority_results.csv written (181 rows × 60 cols).")

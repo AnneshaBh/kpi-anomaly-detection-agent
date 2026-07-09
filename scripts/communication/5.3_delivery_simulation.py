@@ -4,11 +4,12 @@ Simulates routing every alert through its designated communication channel.
 No external APIs are called — this is a pure structured simulation that mirrors
 how a real notification system would behave.
 
-Routing rules
-  ESCALATE   (15) -> Slack #kpi-alerts + Email exec-team DL    -> status: SENT       (same-day 09:30)
-  INVESTIGATE(86) -> Email ops-team DL (daily batch at 08:00)  -> status: QUEUED     (next business day)
-  MONITOR    (74) -> Email analytics-team DL (weekly digest)   -> status: SCHEDULED  (next Monday 09:00)
-  SUPPRESSED  (6) -> Audit log only                            -> status: SUPPRESSED (same-day, no send)
+Routing rules (counts vary by run -- good-direction/positive anomalies
+are always SUPPRESSED regardless of severity, so ESCALATE can be empty)
+  ESCALATE    -> Slack #kpi-alerts + Email exec-team DL    -> status: SENT       (same-day 09:30)
+  INVESTIGATE -> Email ops-team DL (daily batch at 08:00)  -> status: QUEUED     (next business day)
+  MONITOR     -> Email analytics-team DL (weekly digest)   -> status: SCHEDULED  (next Monday 09:00)
+  SUPPRESSED  -> Audit log only                            -> status: SUPPRESSED (same-day, no send)
 
 Input  : data/alert_payloads.csv          (181 x 73)
 Output : data/delivery_log.csv            (181 x 13)
@@ -189,11 +190,12 @@ check(
     f"unexpected: {found_statuses - valid_statuses}",
 )
 
-# T03 — ESCALATE → SENT (15 rows)
+# T03 — ESCALATE → SENT (can legitimately be 0 rows -- good-direction
+# anomalies are always suppressed, regardless of severity)
 esc = log[log["layer4_priority_flag"] == "ESCALATE"]
 check(
     "T03  ESCALATE rows, all SENT",
-    len(esc) > 0 and (esc["delivery_status"] == "SENT").all(),
+    (esc["delivery_status"] == "SENT").all(),
     f"n={len(esc)}  non-SENT={( esc['delivery_status'] != 'SENT').sum()}",
 )
 
@@ -234,12 +236,12 @@ check(
     f"nulls={null_msg}  unique={uniq_msg}",
 )
 
-# T09 — Black Friday spot-check
+# T09 — Black Friday spot-check: positive change -> SUPPRESSED, not sent
 bf = log[log["anomaly_id"] == "ANO-20241129-REV"]
 check(
-    "T09  ANO-20241129-REV: delivery_status=SENT, sent_at on 2024-11-29",
+    "T09  ANO-20241129-REV: delivery_status=SUPPRESSED (positive change, not sent)",
     len(bf) == 1
-    and bf.iloc[0]["delivery_status"] == "SENT"
+    and bf.iloc[0]["delivery_status"] == "SUPPRESSED"
     and pd.Timestamp(bf.iloc[0]["sent_at"]).date() == pd.Timestamp("2024-11-29").date(),
     f"status={bf.iloc[0]['delivery_status'] if len(bf) else 'n/a'}  "
     f"sent_at={bf.iloc[0]['sent_at'] if len(bf) else 'n/a'}",
@@ -365,13 +367,13 @@ summary_lines += [
     "-" * 68,
     "RECIPIENT DISTRIBUTION LISTS",
     "-" * 68,
-    "  exec-team-dl@company.com         ← 15  ESCALATE alerts (immediate)",
-    "  ops-team-dl@company.com          ← 15  ESCALATE + 86  INVESTIGATE alerts",
-    "  analytics-team-dl@company.com    ← 86  INVESTIGATE + 74  MONITOR alerts",
-    "  audit-log@company.com            ←  6  SUPPRESSED alerts (no action)",
+    f"  exec-team-dl@company.com         ← {len(esc):>3}  ESCALATE alerts (immediate)",
+    f"  ops-team-dl@company.com          ← {len(esc):>3}  ESCALATE + {len(inv):>3}  INVESTIGATE alerts",
+    f"  analytics-team-dl@company.com    ← {len(inv):>3}  INVESTIGATE + {len(mon):>3}  MONITOR alerts",
+    f"  audit-log@company.com            ← {len(sup):>3}  SUPPRESSED alerts (no action)",
     "",
     "=" * 68,
-    f"Step 5.3 complete — delivery_log.csv written (181 rows x 13 cols).",
+    f"Step 5.3 complete — delivery_log.csv written ({len(log)} rows x 13 cols).",
     "=" * 68,
 ]
 

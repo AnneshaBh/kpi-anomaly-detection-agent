@@ -63,8 +63,8 @@ def check(label, condition, detail=""):
 
 # T01 — Shape
 check(
-    "T01  Shape (n, 78)",
-    df.shape[0] > 0 and df.shape[1] == 78,
+    "T01  Shape (n, 79)",
+    df.shape[0] > 0 and df.shape[1] == 79,
     f"got {df.shape}",
 )
 
@@ -92,11 +92,13 @@ check(
     f"{null_mid} nulls",
 )
 
-# T05 — All 15 ESCALATE rows: delivery_status=SENT
+# T05 — All ESCALATE rows: delivery_status=SENT (can legitimately be 0
+# rows -- good-direction anomalies are always suppressed, regardless of
+# severity)
 esc = df[df["layer4_priority_flag"] == "ESCALATE"]
 check(
     "T05  All ESCALATE rows -> delivery_status=SENT",
-    len(esc) > 0 and (esc["delivery_status"] == "SENT").all(),
+    (esc["delivery_status"] == "SENT").all(),
     f"n={len(esc)}  non-SENT={( esc['delivery_status'] != 'SENT').sum()}",
 )
 
@@ -131,12 +133,12 @@ check(
     f"unique={df['message_id'].nunique()}",
 )
 
-# T09 — Black Friday spot-check
+# T09 — Black Friday spot-check: positive change -> suppressed, not sent
 bf = df[df["anomaly_id"] == "ANO-20241129-REV"]
 check(
-    "T09  ANO-20241129-REV: delivery_status=SENT, revenue_at_risk<0",
+    "T09  ANO-20241129-REV: delivery_status=SUPPRESSED, revenue_at_risk<0",
     len(bf) == 1
-    and bf.iloc[0]["delivery_status"] == "SENT"
+    and bf.iloc[0]["delivery_status"] == "SUPPRESSED"
     and float(bf.iloc[0]["revenue_at_risk"]) < 0,
     f"rank={bf.iloc[0]['priority_rank'] if len(bf) else 'n/a'}  "
     f"status={bf.iloc[0]['delivery_status'] if len(bf) else 'n/a'}  "
