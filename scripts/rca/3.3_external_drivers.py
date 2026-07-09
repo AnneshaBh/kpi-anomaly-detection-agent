@@ -89,8 +89,37 @@ BASE       = Path(__file__).parent.parent.parent
 DATA       = BASE / "data"
 CAUSAL_CSV = DATA / "rca/rca_causal_results.csv"
 MASTER_CSV = DATA / "processed/master_dataset.csv"
+TIER_JSON  = DATA / "config/tier_config.json"
 OUT_CSV    = DATA / "rca/rca_results.csv"
 DB_PATH    = DATA / "db/kpi_anomaly_detection.db"
+
+# """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+# Tier config helpers -- positive_is_good per KPI (single source of
+# truth for "which direction is good news" across the pipeline)
+# """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+def load_tier_config() -> dict:
+    import json
+    with open(TIER_JSON, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_pig_map(tier_cfg: dict) -> dict:
+    """Return {kpi: positive_is_good (bool)} for all tiered KPIs."""
+    pig_map = {}
+    for tier_data in tier_cfg["tiers"].values():
+        for kpi, meta in tier_data["kpi_metadata"].items():
+            pig_map[kpi] = meta.get("positive_is_good", True)
+    return pig_map
+
+
+def is_good_direction(kpi: str, direction: str, pig_map: dict) -> bool:
+    """True when this KPI moved in its objectively good direction --
+    e.g. revenue UP, or return_rate DOWN. A good-direction change is
+    never a problem, so it should never need to escalate as an alert,
+    regardless of severity or magnitude."""
+    pig = pig_map.get(kpi, True)
+    return (pig and direction == "UP") or (not pig and direction == "DOWN")
 
 # """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 # KPI groups for rule targeting
@@ -128,6 +157,7 @@ def attribute_external_drivers(
     marketing_pressure: float,
     seasonal_index: float,
     consumer_sentiment: float,
+    positive_is_good: bool = True,
 ) -> dict:
     """
     Evaluate all four external driver rules for a single anomaly and
@@ -200,17 +230,41 @@ def attribute_external_drivers(
     else:
         actionability_label = "SUPPRESSED"
 
-    # Escalation suppression: DOWN + externally driven + below-HIGH severity
-    # + actionability below 0.50. Never suppress HIGH severity anomalies.
-    escalation_suppressed = (
+    # Good-direction change: the KPI moved in its objectively good
+    # direction (e.g. revenue UP, return_rate DOWN). This is never a
+    # problem, so it never needs to escalate -- regardless of severity,
+    # magnitude, or whether an external driver rule fired for it.
+    good_direction_change = (
+        (positive_is_good and direction == "UP")
+        or (not positive_is_good and direction == "DOWN")
+    )
+
+    # Bad-direction suppression (unchanged from the original design):
+    # externally driven + below-HIGH severity + actionability below 0.50.
+    # This still never suppresses a genuinely bad, unexplained, or HIGH
+    # severity anomaly -- only bad-direction moves that are both explained
+    # by an external factor and not urgent.
+    bad_direction_suppressed = (
         is_externally_driven
         and direction == "DOWN"
         and severity != "HIGH"
         and actionability_score < 0.50
     )
 
-    suppression_reason = ""
+    escalation_suppressed = good_direction_change or bad_direction_suppressed
+
+    # A good-direction change is suppressed regardless of numeric score,
+    # so the label always agrees with escalation_suppressed by construction.
     if escalation_suppressed:
+        actionability_label = "SUPPRESSED"
+
+    suppression_reason = ""
+    if good_direction_change:
+        suppression_reason = (
+            f"Suppressed: {direction} change on {kpi} is the expected/"
+            f"positive direction -- not an issue, no escalation needed"
+        )
+    elif escalation_suppressed:
         suppression_reason = (
             f"Suppressed: {external_driver_type} "
             f"(actionability={actionability_score:.2f})"
@@ -224,6 +278,7 @@ def attribute_external_drivers(
         "actionability_label":    actionability_label,
         "escalation_suppressed":  escalation_suppressed,
         "suppression_reason":     suppression_reason,
+        "good_direction_change":  good_direction_change,
     }
 
 
@@ -265,7 +320,10 @@ def build_rca_narrative(row: dict) -> str:
 
     # External context
     ext_type = row.get("external_driver_type", "none")
-    if ext_type and ext_type != "none":
+    good_dir = row.get("good_direction_change", False)
+    if good_dir:
+        ext_part = " Positive/expected direction change -- not an issue."
+    elif ext_type and ext_type != "none":
         act_label = row.get("actionability_label", "")
         ext_part  = f" External: {ext_type.replace('_',' ')} detected. Actionability: {act_label}."
     else:
@@ -286,6 +344,7 @@ def main() -> None:
     # "" Load inputs """"""""""""""""""""""""""""""""""""""""""
     causal_df = pd.read_csv(CAUSAL_CSV)
     master_df = pd.read_csv(MASTER_CSV, parse_dates=["date"])
+    pig_map   = build_pig_map(load_tier_config())
 
     causal_df["date"] = pd.to_datetime(causal_df["date"])
 
@@ -320,6 +379,7 @@ def main() -> None:
             marketing_pressure = mkt,
             seasonal_index     = seas,
             consumer_sentiment = sent,
+            positive_is_good   = pig_map.get(row["kpi"], True),
         )
         attr_records.append(attr)
 
@@ -394,7 +454,7 @@ def main() -> None:
         "actionability_label",
     ]
     events = [
-        ("2024-11-29", "total_revenue_usd", "Black Friday -- must NOT be suppressed"),
+        ("2024-11-29", "total_revenue_usd", "Black Friday -- positive change, must be suppressed"),
         ("2024-03-15", "n_orders",          "Inventory stockout"),
         ("2024-09-03", "conversion_rate",   "Email campaign spike"),
         ("2024-02-08", "avg_discount_pct",  "Economic sentiment drop"),
@@ -418,23 +478,39 @@ def main() -> None:
     # "" Validation assertions """""""""""""""""""""""""""""""""
     print("\n--- Layer 3 quality checks ---")
 
-    # Black Friday must never be suppressed
+    # Black Friday is good news (positive revenue change) and must be
+    # suppressed -- it should never generate an alert, regardless of
+    # its HIGH severity.
     bf = out_df[(out_df["date"] == "2024-11-29") & (out_df["kpi"] == "total_revenue_usd")]
-    assert len(bf) > 0 and not bf.iloc[0]["escalation_suppressed"], \
-        "FAIL: Black Friday revenue anomaly should NOT be suppressed"
-    print("PASS  Black Friday not suppressed")
+    assert len(bf) > 0 and bf.iloc[0]["escalation_suppressed"], \
+        "FAIL: Black Friday revenue anomaly should be suppressed (positive change is not an alert)"
+    print("PASS  Black Friday suppressed (positive change -> dashboard only, no alert)")
 
-    # All HIGH severity anomalies must never be suppressed
-    high_sup = out_df[(out_df["severity"] == "HIGH") & (out_df["escalation_suppressed"])]
-    assert len(high_sup) == 0, \
-        f"FAIL: {len(high_sup)} HIGH severity anomalies were suppressed (should be 0)"
-    print(f"PASS  All HIGH anomalies have escalation_suppressed=False  ({len(out_df[out_df['severity']=='HIGH'])} checked)")
+    # Every good-direction change must be suppressed, unconditionally --
+    # good news never escalates, no matter the severity.
+    good_dir_not_sup = out_df[out_df["good_direction_change"] & ~out_df["escalation_suppressed"]]
+    assert len(good_dir_not_sup) == 0, \
+        f"FAIL: {len(good_dir_not_sup)} good-direction anomalies were NOT suppressed (should all be suppressed)"
+    print(f"PASS  All good-direction anomalies suppressed  "
+          f"({int(out_df['good_direction_change'].sum())} checked)")
 
-    # All UP anomalies must never be suppressed
-    up_sup = out_df[(out_df["direction"] == "UP") & (out_df["escalation_suppressed"])]
-    assert len(up_sup) == 0, \
-        f"FAIL: {len(up_sup)} UP anomalies were suppressed (should be 0)"
-    print(f"PASS  All UP anomalies have escalation_suppressed=False  ({len(out_df[out_df['direction']=='UP'])} checked)")
+    # Every bad-direction (genuinely problematic) suppression must still
+    # satisfy the original external-driver criteria -- this is the safety
+    # net that stops a real, unexplained, or HIGH severity problem from
+    # ever being silently hidden.
+    bad_dir_sup = out_df[~out_df["good_direction_change"] & out_df["escalation_suppressed"]]
+    invalid_bad_dir_sup = bad_dir_sup[
+        ~(
+            bad_dir_sup["is_externally_driven"]
+            & (bad_dir_sup["direction"] == "DOWN")
+            & (bad_dir_sup["severity"] != "HIGH")
+            & (bad_dir_sup["actionability_score"] < 0.50)
+        )
+    ]
+    assert len(invalid_bad_dir_sup) == 0, \
+        f"FAIL: {len(invalid_bad_dir_sup)} bad-direction anomalies suppressed without meeting external-driver criteria"
+    print(f"PASS  All bad-direction suppressions are externally-driven, non-HIGH, low-actionability  "
+          f"({len(bad_dir_sup)} checked)")
 
     # rca_narrative must be non-null for all rows
     null_nar = out_df["rca_narrative"].isna().sum()

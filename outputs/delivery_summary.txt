@@ -1,7 +1,7 @@
 ====================================================================
 KPI ANOMALY DETECTION — DELIVERY SIMULATION SUMMARY
 ====================================================================
-Generated : 2026-07-07 11:26
+Generated : 2026-07-09 12:15
 
 TOTAL ALERTS PROCESSED : 183
 
@@ -10,55 +10,153 @@ ROUTING & DELIVERY SUMMARY
 --------------------------------------------------------------------
   Flag            Count  Status        Channel               Timing
   -------------  -----  -----------  --------------------  ------------------------------
-  ESCALATE           15  SENT          Slack + Email         Same-day at 09:30
-  INVESTIGATE        88  QUEUED        Email                 Next business day at 08:00
-  MONITOR            74  SCHEDULED     Digest                Next Monday at 09:00
-  SUPPRESSED          6  SUPPRESSED    None (Audit log)      Logged same-day at 09:00
+  ESCALATE            0  SENT          Slack + Email         Same-day at 09:30
+  INVESTIGATE        23  QUEUED        Email                 Next business day at 08:00
+  MONITOR            41  SCHEDULED     Digest                Next Monday at 09:00
+  SUPPRESSED        119  SUPPRESSED    None (Audit log)      Logged same-day at 09:00
 
 --------------------------------------------------------------------
 SIMULATED TIMELINE
 --------------------------------------------------------------------
-  SENT      window : 2024-01-11 09:30:00 – 2025-11-28 09:30:00
-  QUEUED    window : 2024-01-31 08:00 – 2025-12-25 08:00
+  SENT      window : NaT – NaT
+  QUEUED    window : 2024-03-18 08:00 – 2025-12-01 08:00
   SCHEDULED window : 2024-04-22 09:00 – 2025-12-01 09:00
 
 --------------------------------------------------------------------
 IMMEDIATE ESCALATIONS (SENT)
 --------------------------------------------------------------------
-  2024-01-11 09:30  ANO-20240111-ROAS       avg_roas                MSG-ESC-0001
-  2024-01-31 09:30  ANO-20240131-ROAS       avg_roas                MSG-ESC-0007
-  2024-08-20 09:30  ANO-20240820-REV        total_revenue_usd       MSG-ESC-0003
-  2024-08-20 09:30  ANO-20240820-ORD        n_orders                MSG-ESC-0004
-  2024-11-29 09:30  ANO-20241129-ROAS       avg_roas                MSG-ESC-0008
-  2024-11-29 09:30  ANO-20241129-REV        total_revenue_usd       MSG-ESC-0009
-  2024-11-29 09:30  ANO-20241129-ORD        n_orders                MSG-ESC-0012
-  2024-12-02 09:30  ANO-20241202-REV        total_revenue_usd       MSG-ESC-0005
-  2024-12-02 09:30  ANO-20241202-ORD        n_orders                MSG-ESC-0015
-  2025-01-14 09:30  ANO-20250114-ROAS       avg_roas                MSG-ESC-0006
-  2025-05-25 09:30  ANO-20250525-ROAS       avg_roas                MSG-ESC-0002
-  2025-09-24 09:30  ANO-20250924-ROAS       avg_roas                MSG-ESC-0013
-  2025-09-25 09:30  ANO-20250925-ROAS       avg_roas                MSG-ESC-0014
-  2025-11-28 09:30  ANO-20251128-REV        total_revenue_usd       MSG-ESC-0010
-  2025-11-28 09:30  ANO-20251128-ORD        n_orders                MSG-ESC-0011
 
 --------------------------------------------------------------------
 SUPPRESSED ALERTS (AUDIT LOG ONLY)
 --------------------------------------------------------------------
+  ANO-20241129-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251128-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240111-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250525-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241031-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240820-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240820-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240428-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251224-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241202-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241024-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240227-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250609-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250114-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240131-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241129-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251128-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241129-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240618-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240618-CVR        conversion_rate  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250924-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240417-CVR        conversion_rate  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240618-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250925-CVR        conversion_rate  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250925-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240622-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241202-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240417-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240417-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240723-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251201-REV        total_revenue_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240809-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250121-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240130-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250920-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240903-CVR        conversion_rate  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240412-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251108-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240311-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240930-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240601-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240612-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240624-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250830-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250430-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250226-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250217-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250726-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250819-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240429-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250131-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240711-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240814-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250707-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240817-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250505-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250710-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250220-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251201-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250831-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250129-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240202-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240620-CVR        conversion_rate  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240620-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250130-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250202-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241202-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250131-CVR        conversion_rate  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240619-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240821-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251128-AOV        avg_order_value_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241129-AOV        avg_order_value_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240723-ORD        n_orders      Logged to audit log only. No notification sent. External driver: none. Suppresse
   ANO-20241214-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: competitive_pre
+  ANO-20241202-AOV        avg_order_value_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
   ANO-20250204-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: competitive_pre
   ANO-20250128-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: competitive_pre
   ANO-20241216-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: competitive_pre
   ANO-20250201-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: competitive_pre
   ANO-20240618-ROAS       avg_roas      Logged to audit log only. No notification sent. External driver: competitive_pre
+  ANO-20241105-SES        sessions      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250917-SES        sessions      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240618-AOV        avg_order_value_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240710-BNC        bounce_rate   Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240723-AOV        avg_order_value_usd  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250127-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250131-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241214-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241202-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240626-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241129-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240619-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240711-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241214-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250924-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240620-SES        sessions      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250201-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240622-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240821-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240820-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240417-SES        sessions      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240417-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250114-RET        return_rate   Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241214-SES        sessions      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240620-RET        return_rate   Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250204-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250925-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240820-SES        sessions      Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250201-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250131-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250114-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240417-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20241105-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240626-STK        n_stockouts   Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250917-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250202-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20251128-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20250129-INV        inventory_health  Logged to audit log only. No notification sent. External driver: none. Suppresse
+  ANO-20240618-CLK        total_clicks  Logged to audit log only. No notification sent. External driver: none. Suppresse
 
 --------------------------------------------------------------------
 RECIPIENT DISTRIBUTION LISTS
 --------------------------------------------------------------------
-  exec-team-dl@company.com         ← 15  ESCALATE alerts (immediate)
-  ops-team-dl@company.com          ← 15  ESCALATE + 86  INVESTIGATE alerts
-  analytics-team-dl@company.com    ← 86  INVESTIGATE + 74  MONITOR alerts
-  audit-log@company.com            ←  6  SUPPRESSED alerts (no action)
+  exec-team-dl@company.com         ←   0  ESCALATE alerts (immediate)
+  ops-team-dl@company.com          ←   0  ESCALATE +  23  INVESTIGATE alerts
+  analytics-team-dl@company.com    ←  23  INVESTIGATE +  41  MONITOR alerts
+  audit-log@company.com            ← 119  SUPPRESSED alerts (no action)
 
 ====================================================================
-Step 5.3 complete — delivery_log.csv written (181 rows x 13 cols).
+Step 5.3 complete — delivery_log.csv written (183 rows x 13 cols).
 ====================================================================

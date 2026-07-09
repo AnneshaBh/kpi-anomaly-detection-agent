@@ -449,7 +449,7 @@ def parse_llm_response(text: str) -> dict:
 # ── Load data ─────────────────────────────────────────────────────────────────
 print("Loading priority_results.csv ...")
 df = pd.read_csv(INPUT_CSV, parse_dates=["date"])
-assert df.shape[0] > 0 and df.shape[1] == 59, f"Expected 59 cols, got {df.shape}"
+assert df.shape[0] > 0 and df.shape[1] == 60, f"Expected 60 cols, got {df.shape}"
 
 llm_mask = (
     df["layer4_priority_flag"].isin(["ESCALATE", "INVESTIGATE"])
@@ -566,7 +566,7 @@ out = df.copy()
 for col, vals in cols.items():
     out[col] = vals
 
-assert out.shape[0] > 0 and out.shape[1] == 68, f"Expected 68 cols, got {out.shape}"
+assert out.shape[0] > 0 and out.shape[1] == 69, f"Expected 69 cols, got {out.shape}"
 
 print("Writing outputs ...")
 out.to_csv(OUTPUT_CSV, index=False)

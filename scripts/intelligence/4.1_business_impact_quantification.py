@@ -3,8 +3,8 @@ Layer 4, Step 4.1 — Business Impact Quantification
 Translates each confirmed anomaly into a dollar-denominated revenue impact,
 gross margin impact, and estimated customer count affected.
 
-Input  : data/rca_assembly.csv        (181 × 45)
-Output : data/impact_results.csv      (181 × 51)
+Input  : data/rca_assembly.csv        (181 × 46)
+Output : data/impact_results.csv      (181 × 52)
          SQLite table: impact_results
 """
 
@@ -34,7 +34,7 @@ rca     = pd.read_csv(INPUT_CSV, parse_dates=["date"])
 master  = pd.read_csv(os.path.join(DATA_DIR, "processed", "master_dataset.csv"))
 products = pd.read_csv(os.path.join(DATA_DIR, "raw", "products.csv"))
 
-assert rca.shape[0] > 0 and rca.shape[1] == 45, f"Expected 45 cols, got {rca.shape}"
+assert rca.shape[0] > 0 and rca.shape[1] == 46, f"Expected 46 cols, got {rca.shape}"
 
 
 # ─── Derived baselines (period averages from master_dataset) ──────────────────
@@ -214,7 +214,7 @@ impact["monthly_shortfall"]  = monthly_shortfall_vals.round(2)
 impact["impact_pct_of_plan"] = impact_pct_of_plan_vals.round(4)
 impact["impact_narrative"]   = narrative_vals
 
-assert impact.shape[0] > 0 and impact.shape[1] == 51, f"Expected 51 cols, got {impact.shape}"
+assert impact.shape[0] > 0 and impact.shape[1] == 52, f"Expected 52 cols, got {impact.shape}"
 
 # ─── Write outputs ────────────────────────────────────────────────────────────
 print("Writing outputs …")
@@ -289,4 +289,4 @@ print(f"  Inventory stockout     : revenue_at_risk=${sk['revenue_at_risk']:>10,.
       f"(expect positive — at risk)")
 
 print()
-print("Step 4.1 complete — impact_results.csv written (181 rows × 51 cols).")
+print("Step 4.1 complete — impact_results.csv written (181 rows × 52 cols).")

@@ -62,7 +62,7 @@ DB_PATH       = DATA / "db/kpi_anomaly_detection.db"
 EXPECTED_SHAPES = {
     GRAPH_CSV:  18,
     CAUSAL_CSV: 40,
-    RCA_CSV:    52,
+    RCA_CSV:    53,
 }
 
 # """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -92,7 +92,7 @@ ASSEMBLY_COLS = [
     "snap_economic_index", "snap_marketing_pressure",
     "snap_seasonal_index", "snap_consumer_sentiment",
     "actionability_score", "actionability_label",
-    "escalation_suppressed", "suppression_reason",
+    "escalation_suppressed", "suppression_reason", "good_direction_change",
 
     # --- Assembly metadata ---
     "rca_completeness_score", "layer4_priority_flag",
@@ -248,29 +248,44 @@ def run_quality_tests(df: pd.DataFrame) -> None:
     _pass("Test 5  HIGH anomaly causal confidence",
           f"{n_above_07} / {n_total_high} have root_cause_confidence > 0.70")
 
-    # "" Test 6: Black Friday never suppressed """""""""""""""""
+    # "" Test 6: Black Friday suppressed (positive change, dashboard only) ""
     bf = df[(df["date"] == "2024-11-29") & (df["kpi"] == "total_revenue_usd")]
     assert len(bf) > 0, "Black Friday revenue anomaly not found in assembly"
-    assert not bf.iloc[0]["escalation_suppressed"], \
-        "Black Friday revenue anomaly is incorrectly suppressed"
-    assert bf.iloc[0]["layer4_priority_flag"] == "ESCALATE", \
-        f"Black Friday layer4_priority_flag should be ESCALATE, got {bf.iloc[0]['layer4_priority_flag']}"
-    _pass("Test 6  Black Friday not suppressed",
-          f"escalation_suppressed=False, layer4_priority_flag=ESCALATE")
+    assert bf.iloc[0]["escalation_suppressed"], \
+        "Black Friday revenue anomaly should be suppressed (positive change is not an alert)"
+    assert bf.iloc[0]["layer4_priority_flag"] == "SUPPRESSED", \
+        f"Black Friday layer4_priority_flag should be SUPPRESSED, got {bf.iloc[0]['layer4_priority_flag']}"
+    _pass("Test 6  Black Friday suppressed (positive change)",
+          f"escalation_suppressed=True, layer4_priority_flag=SUPPRESSED")
 
-    # "" Test 7: No HIGH severity anomaly suppressed """""""""""
-    high_sup = df[(df["severity"] == "HIGH") & df["escalation_suppressed"]]
-    assert len(high_sup) == 0, \
-        f"{len(high_sup)} HIGH anomaly rows are suppressed -- should be 0"
-    _pass("Test 7  No HIGH anomaly suppressed",
-          f"all {len(high)} HIGH anomalies have escalation_suppressed=False")
+    # "" Test 7: Every good-direction anomaly is suppressed """""
+    # Good news never escalates, regardless of severity -- so any HIGH
+    # (or MEDIUM/LOW) anomaly that's suppressed must be a good-direction
+    # change; nothing bad-direction should ever be silently dropped.
+    good_dir_not_sup = df[df["good_direction_change"] & ~df["escalation_suppressed"]]
+    assert len(good_dir_not_sup) == 0, \
+        f"{len(good_dir_not_sup)} good-direction anomalies were NOT suppressed -- should be 0"
+    _pass("Test 7  All good-direction anomalies suppressed",
+          f"{int(df['good_direction_change'].sum())} good-direction anomalies, all suppressed")
 
-    # "" Test 8: No UP anomaly suppressed """""""""""""""""""""
-    up_sup = df[(df["direction"] == "UP") & df["escalation_suppressed"]]
-    assert len(up_sup) == 0, \
-        f"{len(up_sup)} UP-direction anomalies are suppressed -- should be 0"
-    n_up = (df["direction"] == "UP").sum()
-    _pass("Test 8  No UP anomaly suppressed", f"all {n_up} UP anomalies unconstrained")
+    # "" Test 8: Bad-direction suppressions still justified """""
+    # A bad-direction (genuinely problematic) anomaly may only be
+    # suppressed when it meets the original external-driver criteria --
+    # externally driven, DOWN, non-HIGH, low actionability. This is the
+    # safety net: a real, unexplained, or HIGH severity problem can never
+    # be silently suppressed just because it isn't "good direction".
+    bad_dir_sup = df[~df["good_direction_change"] & df["escalation_suppressed"]]
+    invalid_bad_dir_sup = bad_dir_sup[
+        ~(
+            bad_dir_sup["is_externally_driven"]
+            & (bad_dir_sup["direction"] == "DOWN")
+            & (bad_dir_sup["severity"] != "HIGH")
+        )
+    ]
+    assert len(invalid_bad_dir_sup) == 0, \
+        f"{len(invalid_bad_dir_sup)} bad-direction anomalies suppressed without meeting external-driver criteria"
+    _pass("Test 8  Bad-direction suppressions all externally justified",
+          f"{len(bad_dir_sup)} bad-direction rows suppressed, all externally-driven, DOWN, non-HIGH")
 
     # "" Test 9: rca_narrative non-null and non-empty """"""""""
     null_nar  = df["rca_narrative"].isna().sum()
@@ -280,6 +295,10 @@ def run_quality_tests(df: pd.DataFrame) -> None:
     _pass(f"Test 9  rca_narrative non-null for all {n_rows} rows")
 
     # "" Test 10: Suppression integrity """"""""""""""""""""""""
+    # Every suppressed row must be either (a) a good-direction change
+    # (positive news, suppressed unconditionally) or (b) a bad-direction
+    # anomaly that meets the external-driver criteria (explained, DOWN,
+    # non-HIGH). No row can be suppressed for any other reason.
     suppressed    = df[df["escalation_suppressed"]]
     n_suppressed  = len(suppressed)
     if n_suppressed > 0:
@@ -287,12 +306,16 @@ def run_quality_tests(df: pd.DataFrame) -> None:
             "Suppressed rows must have actionability_label = SUPPRESSED"
         assert (suppressed["layer4_priority_flag"] == "SUPPRESSED").all(), \
             "Suppressed rows must have layer4_priority_flag = SUPPRESSED"
-        assert (suppressed["direction"] == "DOWN").all(), \
-            "Only DOWN anomalies can be suppressed"
-        assert (suppressed["severity"] != "HIGH").all(), \
-            "HIGH anomalies cannot be suppressed"
+        sup_good_dir     = suppressed["good_direction_change"]
+        sup_bad_dir_ok   = (
+            suppressed["is_externally_driven"]
+            & (suppressed["direction"] == "DOWN")
+            & (suppressed["severity"] != "HIGH")
+        )
+        assert (sup_good_dir | sup_bad_dir_ok).all(), \
+            "Every suppressed row must be a good-direction change or an externally-driven, DOWN, non-HIGH anomaly"
     _pass("Test 10 Suppression integrity",
-          f"{n_suppressed} suppressed rows -- all DOWN, non-HIGH, labeled SUPPRESSED")
+          f"{n_suppressed} suppressed rows -- each is good-direction or externally-driven+DOWN+non-HIGH")
 
     # "" Test 11: rca_completeness_score distribution """"""""""
     hm_score = df[df["severity"].isin(["HIGH", "MEDIUM"])]["rca_completeness_score"]

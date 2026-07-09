@@ -6,8 +6,8 @@ final intelligence_results table that Layer 5 (Communication Layer) reads.
 Runs 12 internal quality assertions before writing any output — if any
 assertion fails the script exits without touching the output files.
 
-Input  : data/recommendations.csv      (181 x 68)
-Output : data/intelligence_results.csv (181 x 68)
+Input  : data/recommendations.csv      (181 x 69)
+Output : data/intelligence_results.csv (181 x 69)
          SQLite table: intelligence_results
 """
 
@@ -49,8 +49,8 @@ def check(label, condition, detail=""):
 
 # Test 1 — Shape
 check(
-    "T01  Shape (n, 68)",
-    df.shape[0] > 0 and df.shape[1] == 68,
+    "T01  Shape (n, 69)",
+    df.shape[0] > 0 and df.shape[1] == 69,
     f"got {df.shape}",
 )
 
@@ -70,11 +70,14 @@ check(
     f"unique={df['priority_rank'].nunique()}",
 )
 
-# Test 4 — All 15 ESCALATE anomalies have priority_band = HIGH
+# Test 4 — All ESCALATE anomalies have priority_band = HIGH
+# ESCALATE can legitimately be empty now that good-direction (positive)
+# anomalies never escalate regardless of severity -- so this only checks
+# the ones that DO escalate, it doesn't require any to exist.
 esc  = df[df["layer4_priority_flag"] == "ESCALATE"]
 check(
     "T04  All ESCALATE anomalies -> priority_band HIGH",
-    len(esc) > 0 and (esc["priority_band"] == "HIGH").all(),
+    (esc["priority_band"] == "HIGH").all(),
     f"n={len(esc)}  non-HIGH={( esc['priority_band'] != 'HIGH').sum()}",
 )
 
@@ -221,5 +224,5 @@ for t in tables_all:
 conn.close()
 
 print()
-print("Step 4.4 complete — intelligence_results.csv written (181 rows x 68 cols).")
+print("Step 4.4 complete — intelligence_results.csv written (181 rows x 69 cols).")
 print("Layer 4 pipeline certified. Ready for Layer 5 (Communication Layer).")
